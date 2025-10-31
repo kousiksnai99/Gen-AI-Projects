@@ -7,7 +7,7 @@
 #################################################################################################
 
 import config
-from azure.identity import DefaultAzureCredential, AzureCliCredential
+from azure.identity import DefaultAzureCredential
 from azure.mgmt.automation import AutomationClient
 from datetime import datetime
 import os
@@ -24,29 +24,49 @@ def create_new_runbook(runbook_name, system_name):
     file_path = os.path.join("generated_runbooks", file_name)
 
     print(f"Retrieving script from existing runbook: {runbook_name}")
+    source_script = None
+
+    # 1️⃣ Try fetching DRAFT content
     try:
-        content_response = client.runbook_draft.get_content(
+        content_stream = client.runbook_draft.get_content(
             resource_group_name=config.RESOURCE_GROUP,
             automation_account_name=config.AUTOMATION_ACCOUNT,
             runbook_name=runbook_name
         )
-        source_script = (
-            content_response.decode("utf-8")
-            if hasattr(content_response, "decode")
-            else str(content_response)
-        )
-        print(f"Successfully retrieved script from runbook: {runbook_name}")
+        if hasattr(content_stream, "read"):
+            source_script = content_stream.read().decode("utf-8")
+        else:
+            source_script = str(content_stream)
+        print(f"Successfully retrieved draft content from runbook: {runbook_name}")
     except Exception as e:
-        print(f"Could not fetch source runbook content: {e}")
-        source_script = (
-            f"# Auto-generated Runbook\n# Name: {file_name}\n# System: {system_name}\n"
-            f"# Created: {time_stamp}\n\nWrite-Output 'Running {file_name}'\n"
-        )
+        print(f"No draft version found or error reading draft: {e}")
 
+    # 2️⃣ If draft not found, try fetching PUBLISHED version
+    if not source_script:
+        try:
+            content_stream = client.runbook.get_content(
+                resource_group_name=config.RESOURCE_GROUP,
+                automation_account_name=config.AUTOMATION_ACCOUNT,
+                runbook_name=runbook_name
+            )
+            if hasattr(content_stream, "read"):
+                source_script = content_stream.read().decode("utf-8")
+            else:
+                source_script = str(content_stream)
+            print(f"Successfully retrieved published content from runbook: {runbook_name}")
+        except Exception as e:
+            print(f"Could not fetch published runbook content: {e}")
+            source_script = (
+                f"# Auto-generated Runbook\n# Name: {file_name}\n# System: {system_name}\n"
+                f"# Created: {time_stamp}\n\nWrite-Output 'Running {file_name}'\n"
+            )
+
+    # Save locally for tracking
     with open(file_path, "w") as f:
         f.write(source_script)
     print(f"Runbook file created locally: {file_path}")
 
+    # Create new runbook
     try:
         runbook = client.runbook.create_or_update(
             resource_group_name=config.RESOURCE_GROUP,
@@ -67,18 +87,20 @@ def create_new_runbook(runbook_name, system_name):
         print(f"Error creating runbook in Azure Automation: {e}")
         return
 
+    # Replace content with copied script
     try:
         poller = client.runbook_draft.begin_replace_content(
             resource_group_name=config.RESOURCE_GROUP,
             automation_account_name=config.AUTOMATION_ACCOUNT,
             runbook_name=new_runbook_name,
-            content=source_script
+            runbook_content=source_script
         )
         poller.result()
         print(f"Runbook content uploaded successfully for: {file_name}")
     except Exception as e:
         print(f"Error replacing runbook content: {e}")
 
+    # Publish new runbook
     try:
         client.runbook.begin_publish(
             resource_group_name=config.RESOURCE_GROUP,
@@ -88,15 +110,3 @@ def create_new_runbook(runbook_name, system_name):
         print(f"Runbook published successfully: {file_name}")
     except Exception as e:
         print(f"Error publishing runbook: {e}")
-
-
-
-
-
-Chat with your agent.
-Your issue : corrupt ost
-Retrieving script from existing runbook: Diagnose_KB0010265
-Could not fetch source runbook content: 'IO'
-Runbook file created locally: generated_runbooks\Diagnose_KB0010265_system_name_20251031_123010.ps1
-Runbook created in Azure Automation: Diagnose_KB0010265_system_name_20251031_123010
-Error replacing runbook content: RunbookDraftOperations.begin_replace_content() missing 1 required positional argument: 'runbook_content'

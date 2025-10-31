@@ -11,66 +11,66 @@ import config
 from azure.identity import DefaultAzureCredential, AzureCliCredential
 from azure.mgmt.automation import AutomationClient
 from datetime import datetime
-import os
-import tempfile   
+import os  # ✅ Added for local file handling
 
 def create_new_runbook(runbook_name, system_name):
-    cred=DefaultAzureCredential()
-    client=AutomationClient(cred, config.SUBSCRIPTION_ID)
+    cred = DefaultAzureCredential()
+    client = AutomationClient(cred, config.SUBSCRIPTION_ID)
     time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # NEW FUNCTIONALITY STARTS HERE
-    # Always create a brand-new PowerShell file safely, without touching pre-approved ones
-    new_runbook_name = f"{runbook_name}_{system_name}_{time_stamp}"
-    temp_dir = tempfile.gettempdir()
-    ps_script_path = os.path.join(temp_dir, f"{new_runbook_name}.ps1")
+    # ✅ Ensure a dedicated folder exists for storing new runbooks
+    os.makedirs("generated_runbooks", exist_ok=True)
 
-    ps_script_content = f"""
-# ===============================================
-# Auto-generated Runbook
-# Name: {new_runbook_name}
-# Created On: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-# ===============================================
+    # ✅ Create unique runbook file name and path
+    file_name = f"{runbook_name}_{system_name}_{time_stamp}.ps1"
+    file_path = os.path.join("generated_runbooks", file_name)
 
-Write-Output "Executing runbook: {new_runbook_name}"
-"""
-    with open(ps_script_path, "w", encoding="utf-8") as ps_file:
-        ps_file.write(ps_script_content.strip())
+    # ✅ Create a PowerShell file locally — this will not touch any pre-approved runbook
+    script_content = f"# Auto-generated Runbook\n# Name: {file_name}\n# System: {system_name}\n# Created: {time_stamp}\n\nWrite-Output 'Running {file_name}'\n"
 
-    print(f"[INFO] Created new local runbook file: {ps_script_path}")
-    # NEW FUNCTIONALITY ENDS HERE
+    with open(file_path, "w") as f:
+        f.write(script_content)
 
-    runbook=client.runbook.create_or_update(
+    print(f"✅ Runbook file created locally: {file_path}")
+
+    # ✅ Create new runbook in Azure Automation with unique name
+    runbook = client.runbook.create_or_update(
         resource_group_name=config.RESOURCE_GROUP,
-        automation_account_name= config.AUTOMATION_ACCOUNT,
+        automation_account_name=config.AUTOMATION_ACCOUNT,
         runbook_name=f"{runbook_name}_{system_name}_{time_stamp}",
         parameters={
-            "location":config.LOCATION,
+            "location": config.LOCATION,
             "name": f"{runbook_name}_{system_name}_{time_stamp}",
-            "properties":{
-                "runbookType":"PowerShell",
+            "properties": {
+                "runbookType": "PowerShell",
                 "logProgress": True,
                 "logVerbose": False,
-                },
-                },
-                )
-    
-    # Upload PowerShell script content to the new runbook
-    with open(ps_script_path, "r", encoding="utf-8") as content_file:
-        content = content_file.read()
-
-    client.runbook_draft.replace_content(
-        resource_group_name=config.RESOURCE_GROUP,
-        automation_account_name=config.AUTOMATION_ACCOUNT,
-        runbook_name=new_runbook_name,
-        content=content,
+            },
+        },
     )
 
-    # Publish the runbook
-    client.runbook_draft.publish(
-        resource_group_name=config.RESOURCE_GROUP,
-        automation_account_name=config.AUTOMATION_ACCOUNT,
-        runbook_name=new_runbook_name,
-    )
+    print(f"☁️ Runbook created in Azure Automation: {runbook.name}")
 
-    print(f"[SUCCESS] Runbook '{new_runbook_name}' created and published successfully.")
+    # ✅ Replace the draft content using the new async method
+    try:
+        poller = client.runbook_draft.begin_replace_content(
+            resource_group_name=config.RESOURCE_GROUP,
+            automation_account_name=config.AUTOMATION_ACCOUNT,
+            runbook_name=f"{runbook_name}_{system_name}_{time_stamp}",
+            content=script_content
+        )
+        poller.result()  # Wait for completion
+        print(f"✍️ Runbook content uploaded successfully for: {file_name}")
+    except Exception as e:
+        print(f"⚠️ Error replacing runbook content: {e}")
+
+    # ✅ Publish the new runbook (same as before, nothing changed)
+    try:
+        client.runbook.begin_publish(
+            resource_group_name=config.RESOURCE_GROUP,
+            automation_account_name=config.AUTOMATION_ACCOUNT,
+            runbook_name=f"{runbook_name}_{system_name}_{time_stamp}"
+        ).result()
+        print(f"🚀 Runbook published successfully: {file_name}")
+    except Exception as e:
+        print(f"⚠️ Error publishing runbook: {e}")

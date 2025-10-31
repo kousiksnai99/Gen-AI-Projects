@@ -88,3 +88,15 @@ def create_new_runbook(runbook_name, system_name):
         print(f"Runbook published successfully: {file_name}")
     except Exception as e:
         print(f"Error publishing runbook: {e}")
+
+
+
+
+
+Chat with your agent.
+Your issue : corrupt ost
+Retrieving script from existing runbook: Diagnose_KB0010265
+Could not fetch source runbook content: 'IO'
+Runbook file created locally: generated_runbooks\Diagnose_KB0010265_system_name_20251031_123010.ps1
+Runbook created in Azure Automation: Diagnose_KB0010265_system_name_20251031_123010
+Error replacing runbook content: RunbookDraftOperations.begin_replace_content() missing 1 required positional argument: 'runbook_content'

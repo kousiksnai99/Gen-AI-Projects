@@ -13,7 +13,41 @@ from datetime import datetime
 import os
 import requests
 
+def get_source_content(runbook_name):
+    """
+    Fetch runbook content directly from Azure REST API.
+    Works for both Draft and Published versions.
+    """
+    credential = DefaultAzureCredential()
+    token = credential.get_token("https://management.azure.com/.default").token
+
+    url = (
+        f"https://management.azure.com/subscriptions/{config.SUBSCRIPTION_ID}"
+        f"/resourceGroups/{config.RESOURCE_GROUP}"
+        f"/providers/Microsoft.Automation/automationAccounts/{config.AUTOMATION_ACCOUNT}"
+        f"/runbooks/{runbook_name}/content?api-version=2024-10-23"
+    )
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/octet-stream"
+    }
+
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 200:
+        runbook_content = response.content.decode("utf-8", errors="ignore")
+        print(f"Successfully fetched content for {runbook_name}")
+        return runbook_content
+    else:
+        print(f"Failed to fetch content for {runbook_name}: {response.status_code} - {response.text}")
+        return None
+
+
 def create_new_runbook(runbook_name, system_name):
+    """
+    Creates a new runbook by copying content from an existing one.
+    """
     cred = DefaultAzureCredential()
     client = AutomationClient(cred, config.SUBSCRIPTION_ID)
     time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -24,20 +58,56 @@ def create_new_runbook(runbook_name, system_name):
     file_name = f"{new_runbook_name}.ps1"
     file_path = os.path.join("generated_runbooks", file_name)
 
+    # Fetch source content
     print(f"Retrieving script from existing runbook: {runbook_name}")
-    source_script = get_source_content(runbook_name)
+    source_script = None
 
-    # Fallback if no content retrieved
+    # 1️⃣ Try fetching DRAFT content
+    try:
+        content_stream = client.runbook_draft.get_content(
+            resource_group_name=config.RESOURCE_GROUP,
+            automation_account_name=config.AUTOMATION_ACCOUNT,
+            runbook_name=runbook_name
+        )
+        if hasattr(content_stream, "read"):
+            source_script = content_stream.read().decode("utf-8")
+        else:
+            source_script = str(content_stream)
+        print(f"Successfully retrieved draft content from runbook: {runbook_name}")
+    except Exception as e:
+        print(f"No draft version found or error reading draft: {e}")
+
+    # 2️⃣ If draft not found, try fetching PUBLISHED version
+    if not source_script:
+        try:
+            content_stream = client.runbook.get_content(
+                resource_group_name=config.RESOURCE_GROUP,
+                automation_account_name=config.AUTOMATION_ACCOUNT,
+                runbook_name=runbook_name
+            )
+            if hasattr(content_stream, "read"):
+                source_script = content_stream.read().decode("utf-8")
+            else:
+                source_script = str(content_stream)
+            print(f"Successfully retrieved published content from runbook: {runbook_name}")
+        except Exception as e:
+            print(f"Could not fetch published runbook content: {e}")
+            print("Trying to fetch using REST API fallback method.")
+            source_script = get_source_content(runbook_name)
+
+    # Fallback default script if nothing could be retrieved
     if not source_script:
         source_script = (
             f"# Auto-generated Runbook\n# Name: {file_name}\n# System: {system_name}\n"
             f"# Created: {time_stamp}\n\nWrite-Output 'Running {file_name}'\n"
         )
 
-    with open(file_path, "w") as f:
+    # Save locally
+    with open(file_path, "w", encoding="utf-8") as f:
         f.write(source_script)
     print(f"Runbook file created locally: {file_path}")
 
+    # Create new runbook in Azure Automation
     try:
         runbook = client.runbook.create_or_update(
             resource_group_name=config.RESOURCE_GROUP,
@@ -58,6 +128,7 @@ def create_new_runbook(runbook_name, system_name):
         print(f"Error creating runbook in Azure Automation: {e}")
         return
 
+    # Replace content with copied script
     try:
         poller = client.runbook_draft.begin_replace_content(
             resource_group_name=config.RESOURCE_GROUP,
@@ -70,6 +141,7 @@ def create_new_runbook(runbook_name, system_name):
     except Exception as e:
         print(f"Error replacing runbook content: {e}")
 
+    # Publish new runbook
     try:
         client.runbook.begin_publish(
             resource_group_name=config.RESOURCE_GROUP,
@@ -79,25 +151,3 @@ def create_new_runbook(runbook_name, system_name):
         print(f"Runbook published successfully: {file_name}")
     except Exception as e:
         print(f"Error publishing runbook: {e}")
-
-
-def get_source_content(runbook_name):
-    credential = DefaultAzureCredential()
-    token = credential.get_token("https://management.azure.com/.default").token
-    url = (
-        f"https://management.azure.com/subscriptions/{config.SUBSCRIPTION_ID}"
-        f"/resourceGroups/{config.RESOURCE_GROUP}/providers/Microsoft.Automation/"
-        f"automationAccounts/{config.AUTOMATION_ACCOUNT}/runbooks/{runbook_name}/content"
-        f"?api-version=2024-10-23"
-    )
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/octet-stream"
-    }
-
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        return response.content.decode("utf-8", errors="ignore")
-    else:
-        print(f"Failed to fetch content: {response.status_code} {response.text}")
-        return None

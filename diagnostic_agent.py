@@ -92,36 +92,43 @@ else:
 ## Purpose: Expose the diagnostic_agent functionality via FastAPI REST API                     #
 #################################################################################################
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+#################################################################################################
+## Project name : Agentic AI POC                                                                #
+## Business owner , Team : Data and AIA                                                         #
+## Notebook Author , Team: POC Team                                                             #
+## Date: 29th Oct 2025                                                                          #
+## Purpose: FastAPI wrapper to trigger diagnostic agent workflow                                #
+#################################################################################################
+
+from fastapi import FastAPI, Request
+import uvicorn
 from diagnostic_agent import process_issue
 from utilsy import create_new_runbook
 
-app = FastAPI(title="Diagnostic Agent API")
-
-class IssueRequest(BaseModel):
-    issue: str
-    execute: bool = False
-    target_machine: str = "demo_system"
+app = FastAPI(title="Agentic AI Diagnostic API")
 
 @app.post("/diagnostic/chat")
-def chat_with_agent(req: IssueRequest):
-    """
-    Takes an issue string and returns runbook name.
-    Optionally executes the runbook if execute=True.
-    """
-    try:
-        runbook_name = process_issue(req.issue)
-        if not runbook_name:
-            raise HTTPException(status_code=404, detail="No runbook name found from agent response.")
+async def diagnostic_chat(request: Request):
+    body = await request.json()
+    issue = body.get("issue")
 
-        if req.execute:
-            create_new_runbook(runbook_name, req.target_machine)
-            return {"runbook_name": runbook_name, "message": f"Runbook '{runbook_name}' executed on {req.target_machine}"}
+    if not issue:
+        return {"error": "Missing 'issue' in request body."}
 
-        return {"runbook_name": runbook_name, "message": "Runbook ready but not executed."}
+    response = process_issue(issue)
+    if not response:
+        return {"message": "No runbook found for the given issue."}
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    print("We are going to do testing in your system.")
+    print("Please close all confidential documents before proceeding.")
+    print(f"We will be executing: {response}")
+
+    runbook_created = create_new_runbook(response, 'demo_system')
+    if runbook_created:
+        return {"message": f"Runbook '{response}' executed successfully."}
+    else:
+        return {"error": "Failed to create or execute runbook."}
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)

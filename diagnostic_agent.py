@@ -124,3 +124,13 @@ if __name__ == "__main__":
                 create_new_runbook(response, 'demo_system')
             else:
                 print("Sorry I am exiting without Running the script")
+
+
+
+
+
+Traceback (most recent call last):
+  File "F:\Kousik\helpdesk_assistant\diagnostic_agent.py", line 73, in <module>
+    from fastapi import FastAPI, Request
+ModuleNotFoundError: No module named 'fastapi'
+

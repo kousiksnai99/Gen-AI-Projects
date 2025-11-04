@@ -58,11 +58,9 @@ def create_new_runbook(runbook_name, system_name):
     file_name = f"{new_runbook_name}.ps1"
     file_path = os.path.join("generated_runbooks", file_name)
 
-    # Fetch source content
     print(f"Retrieving script from existing runbook: {runbook_name}")
     source_script = None
 
-    # 1️⃣ Try fetching DRAFT content
     try:
         content_stream = client.runbook_draft.get_content(
             resource_group_name=config.RESOURCE_GROUP,
@@ -77,7 +75,6 @@ def create_new_runbook(runbook_name, system_name):
     except Exception as e:
         print(f"No draft version found or error reading draft: {e}")
 
-    # 2️⃣ If draft not found, try fetching PUBLISHED version
     if not source_script:
         try:
             content_stream = client.runbook.get_content(
@@ -95,19 +92,16 @@ def create_new_runbook(runbook_name, system_name):
             print("Trying to fetch using REST API fallback method.")
             source_script = get_source_content(runbook_name)
 
-    # Fallback default script if nothing could be retrieved
     if not source_script:
         source_script = (
             f"# Auto-generated Runbook\n# Name: {file_name}\n# System: {system_name}\n"
             f"# Created: {time_stamp}\n\nWrite-Output 'Running {file_name}'\n"
         )
 
-    # Save locally
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(source_script)
     print(f"Runbook file created locally: {file_path}")
 
-    # Create new runbook in Azure Automation
     try:
         runbook = client.runbook.create_or_update(
             resource_group_name=config.RESOURCE_GROUP,
@@ -128,7 +122,6 @@ def create_new_runbook(runbook_name, system_name):
         print(f"Error creating runbook in Azure Automation: {e}")
         return
 
-    # Replace content with copied script
     try:
         poller = client.runbook_draft.begin_replace_content(
             resource_group_name=config.RESOURCE_GROUP,
@@ -141,7 +134,6 @@ def create_new_runbook(runbook_name, system_name):
     except Exception as e:
         print(f"Error replacing runbook content: {e}")
 
-    # Publish new runbook
     try:
         client.runbook.begin_publish(
             resource_group_name=config.RESOURCE_GROUP,

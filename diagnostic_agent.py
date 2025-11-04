@@ -125,3 +125,7 @@ def chat_with_agent(req: IssueRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "message": "Diagnostic Agent API is running"}

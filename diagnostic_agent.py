@@ -11,6 +11,9 @@ from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential, AzureCliCredential
 from azure.ai.agents.models import ListSortOrder
 from azure.mgmt.automation import AutomationClient
+from fastapi import FastAPI
+from pydantic import BaseModel
+import uvicorn
 import config
 from utilsy import create_new_runbook 
 #import tools
@@ -72,25 +75,72 @@ def process_issue(issue):
             runbook_name = message.text_messages[-1].text.value
 
     if runbook_name:
+        # execute_runbook(runbook_name)
         return runbook_name
     else:
         print("No runbook name found.")
         return None
 
-# CLI-based user interaction
-print("Chat with your agent.")
-issue = input("Your issue : ").strip()
-response = process_issue(issue)
 
-if test_input == 'y':
-    #tools.execute_runbook(response)
-    pass
-else:
-    print("We are going to do testing in your system.")
-    print("Please close all the confidential documents and type y")
-    print(f"We will be executing {response}")
-    run_script = input("y/n:    ")
-    if run_script == 'y':
-        create_new_runbook(response, 'demo_system')
+#################################################################################################
+## FASTAPI INTEGRATION SECTION                                                                 ##
+#################################################################################################
+
+app = FastAPI(title="Diagnostic Agent API", version="1.0")
+
+class IssueRequest(BaseModel):
+    issue: str
+    execute: bool = False  # optional: if true, will execute create_new_runbook
+
+@app.post("/chat")
+async def chat_with_agent(req: IssueRequest):
+    """
+    Endpoint to process an issue through the diagnostic agent.
+    """
+    try:
+        result = process_issue(req.issue)
+        if not result:
+            return {"status": "failed", "message": "No runbook name found."}
+        
+        if req.execute:
+            create_new_runbook(result, 'demo_system')
+            return {
+                "status": "success",
+                "runbook_name": result,
+                "message": "Runbook executed locally."
+            }
+        else:
+            return {
+                "status": "success",
+                "runbook_name": result,
+                "message": "Runbook name retrieved successfully."
+            }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+#################################################################################################
+## CLI-BASED EXECUTION SECTION (ORIGINAL LOGIC PRESERVED)                                      ##
+#################################################################################################
+
+if __name__ == "__main__":
+    import sys
+    # If '--api' flag is passed, start FastAPI instead of CLI
+    if len(sys.argv) > 1 and sys.argv[1] == "--api":
+        uvicorn.run("diagnostic_agent:app", host="127.0.0.1", port=8000)
     else:
-        print("Sorry I am exiting without Running the script")
+        print("Chat with your agent.")
+        issue = input("Your issue : ").strip()
+        response = process_issue(issue)
+        if test_input == 'y':
+            #tools.execute_runbook(response)
+            pass
+        else:
+            print("We are going to do testing in your system.")
+            print("Please close all the confidential documents and type y")
+            print(f"We will be executing {response} ")
+            run_script = input("y/n:    ")
+            if run_script == 'y':
+                create_new_runbook(response, 'demo_system')
+            else:
+                print("Sorry I am exiting without Running the script")

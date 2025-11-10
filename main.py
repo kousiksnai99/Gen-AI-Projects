@@ -54,37 +54,26 @@ def chat_with_diagnostic_agent(req: IssueRequest):
 @app.post("/troubleshooting/chat")
 def chat_with_troubleshooting_agent(req: IssueRequest):
     try:
-        clean_runbook_name, full_text = troubleshooting_process_issue(req.issue)
+        clean_name, full_text = troubleshooting_process_issue(req.issue)
 
-        if not clean_runbook_name:
+        if not clean_name:
             raise HTTPException(status_code=404, detail="No runbook name found")
 
-        # Step 1: No confirmation yet → Only show summary
-        if req.confirm is None:
+        if req.execute:
+            create_new_runbook(clean_name, req.target_machine)
             return {
-                "summary": full_text,
-                "target_machine": req.target_machine,
-                "question": "Do you want to proceed with applying this fix on the machine?",
-                "response_options": ["yes", "no"]
+                "runbook_name": clean_name,
+                "message": full_text
             }
 
-        # Step 2: User confirmed yes → Execute
-        if req.confirm.lower() == "yes":
-            create_new_runbook(clean_runbook_name, req.target_machine)
-            return {
-                "message": f"Solution has been executed on {req.target_machine}."
-            }
-
-        # Step 2: User declined
-        if req.confirm.lower() == "no":
-            return {
-                "message": "Execution cancelled."
-            }
-
-        return {"message": "Invalid confirm input. Use yes or no."}
+        return {
+            "runbook_name": clean_name,
+            "message": full_text
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.get("/health")

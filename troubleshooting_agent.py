@@ -1,31 +1,53 @@
 #################################################################################################
-## File: troubleshooting_agent.py
-## Purpose: Agent that identifies the correct troubleshooting runbook for issues.
+## Project name : Agentic AI POC                                                                #
+## Purpose: Troubleshooting Agent                                                               #
 #################################################################################################
 
 from azure.ai.projects import AIProjectClient
 from azure.identity import AzureCliCredential
 from azure.ai.agents.models import ListSortOrder
 import config
-from utils import sanitize_runbook_name
 
+# Initialize AI Project
 project = AIProjectClient(
     credential=AzureCliCredential(),
     endpoint=config.MODEL_ENDPOINT
 )
 
+# Load Troubleshooting Agent
 agent = project.agents.get_agent(config.TROUBLESHOOTING_AGENT_ID)
 
-def process_issue_troubleshoot(issue):
-    # Create a new conversation thread
-    thread = project.agents.threads.create()
 
+def extract_runbook_name(full_text):
+    """
+    Extract only the runbook name from the beginning of the response.
+    Example incoming:
+        "Troubleshoot_KB0010265 – Cannot Open Outlook..."
+    Output:
+        "Troubleshoot_KB0010265"
+    """
+    if not full_text:
+        return None
+
+    # First line only
+    first_line = full_text.split("\n")[0]
+
+    # Split before dash or long text
+    clean = first_line.split("–")[0].split("-")[0].strip()
+
+    return clean
+
+
+def process_issue(issue):
+    # Create cloud thread
+    thread = project.agents.threads.create()
     project.agents.messages.create(
         thread_id=thread.id,
         role="user",
         content=issue
     )
 
+    # Process the response
     run = project.agents.runs.create_and_process(
         thread_id=thread.id,
         agent_id=agent.id
@@ -33,22 +55,19 @@ def process_issue_troubleshoot(issue):
 
     if run.status == "failed":
         print(f"Run failed: {run.last_error}")
-        return None
+        return None, None
 
+    # Get messages
     messages = project.agents.messages.list(thread_id=thread.id, order=ListSortOrder.ASCENDING)
 
-    runbook_name = None
+    full_text = None
     for message in messages:
         if message.text_messages:
-            raw_name = message.text_messages[-1].text.value
-            runbook_name = sanitize_runbook_name(raw_name)
+            full_text = message.text_messages[-1].text.value
 
-    return runbook_name
+    if not full_text:
+        return None, None
 
+    clean_name = extract_runbook_name(full_text)
 
-
-
-{
-    "runbook_name": "Troubleshoot_KB0010265 – Cannot Open Microsoft Outlook. This issue involves Outlook failing to open; I’m now performing the following steps:\n1. Check for corrupted OST files and rebuild if needed\n2. Reset Outlook startup configuration\n3. Repair Outlook profile and launch settings",
-    "message": "Runbook 'Troubleshoot_KB0010265 – Cannot Open Microsoft Outlook. This issue involves Outlook failing to open; I’m now performing the following steps:\n1. Check for corrupted OST files and rebuild if needed\n2. Reset Outlook startup configuration\n3. Repair Outlook profile and launch settings' executed on demo_syetem"
-}
+    return clean_name, full_text   # ✅ RETURN BOTH

@@ -44,3 +44,11 @@ def process_issue_troubleshoot(issue):
             runbook_name = sanitize_runbook_name(raw_name)
 
     return runbook_name
+
+
+
+
+{
+    "runbook_name": "Troubleshoot_KB0010265 – Cannot Open Microsoft Outlook. This issue involves Outlook failing to open; I’m now performing the following steps:\n1. Check for corrupted OST files and rebuild if needed\n2. Reset Outlook startup configuration\n3. Repair Outlook profile and launch settings",
+    "message": "Runbook 'Troubleshoot_KB0010265 – Cannot Open Microsoft Outlook. This issue involves Outlook failing to open; I’m now performing the following steps:\n1. Check for corrupted OST files and rebuild if needed\n2. Reset Outlook startup configuration\n3. Repair Outlook profile and launch settings' executed on demo_syetem"
+}

@@ -70,3 +70,9 @@ def health_check():
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+
+{
+    "runbook_name": "Troubleshoot_KB0010265",
+    "message": "Troubleshoot_KB0010265 – Cannot Open Microsoft Outlook. This is an issue where Outlook fails to open; I’m now performing the following steps:\n1. Check for corrupted OST files and rebuild if needed\n2. Reset Outlook startup configuration\n3. Repair Outlook profile and launch settings"
+}

@@ -47,18 +47,18 @@ def chat_with_troubleshooting_agent(req: IssueRequest):
         clean_name, full_text = troubleshooting_process_issue(req.issue)
 
         if not clean_name:
-            raise HTTPException(status_code=404, detail="No runbook name found from troubleshooting agent.")
+            raise HTTPException(status_code=404, detail="No runbook name found")
 
         if req.execute:
             create_new_runbook(clean_name, req.target_machine)
             return {
                 "runbook_name": clean_name,
-                "message": full_text + f"\n\n✅ Runbook executed on {req.target_machine}"
+                "message": full_text
             }
 
         return {
             "runbook_name": clean_name,
-            "message": full_text  # ✅ Hoga EXACT JO POSTMAN MEIN CHAHIYE
+            "message": full_text
         }
 
     except Exception as e:

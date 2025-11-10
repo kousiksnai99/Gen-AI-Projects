@@ -72,6 +72,15 @@ def process_issue(issue):
 
     return clean_name, full_text   
 
+Retrieving script from existing runbook: Troubleshoot_KB0010265
+No draft version found or error reading draft: 'IO'
+Could not fetch published runbook content: 'IO'
+Trying to fetch using REST API fallback method.
+Successfully fetched content for Troubleshoot_KB0010265
+Runbook file created locally: generated_runbooks\Troubleshoot_KB0010265_demo_syetem_20251110_170055.ps1
+Runbook created in Azure Automation: Troubleshoot_KB0010265_demo_syetem_20251110_170055
+Runbook content uploaded successfully for: Troubleshoot_KB0010265_demo_syetem_20251110_170055.ps1
+Runbook published successfully: Troubleshoot_KB0010265_demo_syetem_20251110_170055.ps1
 {
     "runbook_name": "Troubleshoot_KB0010265",
     "message": "Troubleshoot_KB0010265 – Cannot Open Microsoft Outlook. This issue prevents Outlook from launching correctly; I’m now performing the following steps:\n1. Check for corrupted OST files and rebuild if needed\n2. Reset Outlook startup configuration\n3. Repair Outlook profile and launch settings\n\n Runbook executed on demo_syetem"

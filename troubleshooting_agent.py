@@ -70,4 +70,8 @@ def process_issue(issue):
 
     clean_name = extract_runbook_name(full_text)
 
-    return clean_name, full_text   # ✅ RETURN BOTH
+    return clean_name, full_text   
+
+{
+    "detail": "[Errno 22] Invalid argument: 'generated_runbooks\\\\Troubleshoot_KB0010265 — This is a \"Cannot Open Microsoft Outlook\" issue. I’m now performing the following steps:_demo_syetem_20251110_085241.ps1'"
+}

@@ -54,58 +54,39 @@ def chat_with_diagnostic_agent(req: IssueRequest):
 
 @app.post("/troubleshooting/chat")
 def chat_with_troubleshooting_agent(req: IssueRequest):
-    """
-    Two-step troubleshooting flow:
-      - If request.issue is an affirmative ("yes"/"y") (case-insensitive), we look up the pending confirmation
-        for req.target_machine and, if found, execute the runbook and return execution message.
-      - Otherwise: call the troubleshooting agent to get the runbook name and full_text, store a pending
-        confirmation and return the message + a next_step prompt asking the user to confirm running the runbook.
-    The JSON responses are kept simple and match the requested format.
-    """
     try:
-        # Clean expired pendings first
         cleanup_expired_pending()
 
-        user_issue_normalized = (req.issue or "").strip().lower()
+        user_input = (req.issue or "").strip().lower()
 
-        # If user replied "yes" (confirmation) -> execute the pending runbook for this target_machine
-        if user_issue_normalized in ("yes", "y"):
+        # STEP 2 CONFIRMATION
+        if user_input in ("yes", "y"):
             with PENDING_LOCK:
                 pending = PENDING_CONFIRMATIONS.get(req.target_machine)
                 if not pending:
-                    raise HTTPException(status_code=404, detail="No pending runbook confirmation found for this target machine. Please request troubleshooting first.")
+                    raise HTTPException(status_code=404, detail="No pending runbook confirmation found.")
                 runbook_name = pending["runbook_name"]
-
-                # Remove pending immediately to avoid double execution
                 del PENDING_CONFIRMATIONS[req.target_machine]
 
-            # Execute runbook now
             create_new_runbook(runbook_name, req.target_machine)
             return {"message": f"Runbook executed on {req.target_machine}"}
 
-        # Otherwise: treat this as initial troubleshooting request
-        clean_name, full_text = troubleshooting_process_issue(req.issue)
+        # STEP 1 - CALL AGENT
+        runbook_name, step_message = troubleshooting_process_issue(req.issue)
 
-        if not clean_name:
-            raise HTTPException(status_code=404, detail="No runbook name found from troubleshooting agent.")
+        if not runbook_name:
+            raise HTTPException(status_code=404, detail="No runbook identified.")
 
-        # Store pending confirmation (only if execute flag is True the user expects to run it later)
         if req.execute:
             with PENDING_LOCK:
                 PENDING_CONFIRMATIONS[req.target_machine] = {
-                    "runbook_name": clean_name,
-                    "full_text": full_text,
+                    "runbook_name": runbook_name,
                     "expires_at": datetime.utcnow() + timedelta(seconds=PENDING_TTL_SECONDS)
                 }
 
-        # Respond with message and next_step prompt as requested
-        next_step_text = (
-            f"Do you want me to fix this issue automatically by running runbook '{clean_name}' (yes/no)?"
-        )
-
         return {
-            "message": full_text,
-            "next_step": next_step_text
+            "message": step_message,
+            "next_step": "Do you want me to fix this issue automatically? (yes/no)"
         }
 
     except HTTPException:

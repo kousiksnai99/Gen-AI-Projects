@@ -1,6 +1,6 @@
 #################################################################################################
-## File: main.py
-## Purpose: Expose Diagnostic & Troubleshooting Agent APIs
+## File: main.py                                                                     #
+## Purpose: Expose the diagnostic_agent & troubleshooting_agent via FastAPI REST API           #
 #################################################################################################
 
 from fastapi import FastAPI, HTTPException
@@ -10,27 +10,24 @@ from troubleshooting_agent import process_issue as troubleshooting_process_issue
 from utils import create_new_runbook
 import uvicorn
 
-app = FastAPI(title="Diagnostic + Troubleshooting Agent API")
+app = FastAPI(title="Agentic AI Diagnostic & Troubleshooting API")
 
 class IssueRequest(BaseModel):
     issue: str
-    target_machine: str = "demo_system"
-    confirm: str | None = None
     execute: bool = False
+    target_machine: str = "demo_system"
 
 
-#########################################
-# Diagnostic Agent Endpoint (RESTORED)
-#########################################
+############################################
+# ✅ Diagnostic Agent Endpoint (NO CHANGE)
+############################################
 @app.post("/diagnostic/chat")
 def chat_with_diagnostic_agent(req: IssueRequest):
     try:
         runbook_name = diagnostic_process_issue(req.issue)
-
         if not runbook_name:
-            raise HTTPException(status_code=404, detail="No runbook name found from diagnostic agent.")
+            raise HTTPException(status_code=404, detail="No runbook name found from agent response.")
 
-        # If user asked to execute
         if req.execute:
             create_new_runbook(runbook_name, req.target_machine)
             return {
@@ -38,7 +35,6 @@ def chat_with_diagnostic_agent(req: IssueRequest):
                 "message": f"Runbook '{runbook_name}' executed on {req.target_machine}"
             }
 
-        # Return only runbook reference
         return {
             "runbook_name": runbook_name,
             "message": "Runbook ready but not executed."
@@ -48,32 +44,31 @@ def chat_with_diagnostic_agent(req: IssueRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-#############################################
-# Troubleshooting Agent Endpoint (Two-Step)
-#############################################
-@app.post("/troubleshooting/chat")
+############################################
+# ✅ Troubleshooting Agent Endpoint (NEW)
+############################################
+@app.post("/troubleshoot/chat")
 def chat_with_troubleshooting_agent(req: IssueRequest):
     try:
-        clean_name, full_text = troubleshooting_process_issue(req.issue)
+        runbook_name, explanation = troubleshooting_process_issue(req.issue)
 
-        if not clean_name:
-            raise HTTPException(status_code=404, detail="No runbook name found")
+        if not runbook_name:
+            raise HTTPException(status_code=404, detail="No valid runbook name returned by agent.")
 
         if req.execute:
-            create_new_runbook(clean_name, req.target_machine)
+            create_new_runbook(runbook_name, req.target_machine)
             return {
-                "runbook_name": clean_name,
-                "message": full_text
+                "runbook_name": runbook_name,
+                "message": explanation
             }
 
         return {
-            "runbook_name": clean_name,
-            "message": full_text
+            "runbook_name": runbook_name,
+            "message": explanation
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 
 @app.get("/health")

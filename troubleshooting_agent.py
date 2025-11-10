@@ -1,87 +1,122 @@
 #################################################################################################
-## Project name : Agentic AI POC                                                                #
-## Purpose: Troubleshooting Agent                                                               #
+## File: main.py                                                                     #
+## Purpose: Expose Diagnostic & Troubleshooting Agent APIs                            #
 #################################################################################################
 
-from azure.ai.projects import AIProjectClient
-from azure.identity import AzureCliCredential
-from azure.ai.agents.models import ListSortOrder
-import config
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from diagnostic_agent import process_issue as diagnostic_process_issue
+from troubleshooting_agent import process_issue as troubleshooting_process_issue
+from utils import create_new_runbook
+import uvicorn
+from datetime import datetime, timedelta
+import threading
 
-# Initialize AI Project
-project = AIProjectClient(
-    credential=AzureCliCredential(),
-    endpoint=config.MODEL_ENDPOINT
-)
+app = FastAPI(title="Diagnostic + Troubleshooting Agent API")
 
-# Load Troubleshooting Agent
-agent = project.agents.get_agent(config.TROUBLESHOOTING_AGENT_ID)
+class IssueRequest(BaseModel):
+    issue: str
+    execute: bool = False
+    target_machine: str = "demo_system"
+
+# In-memory pending confirmation store
+# Structure: { target_machine: {"runbook_name": str, "full_text": str, "expires_at": datetime} }
+PENDING_CONFIRMATIONS = {}
+PENDING_LOCK = threading.Lock()
+PENDING_TTL_SECONDS = 300  # pending confirmation valid for 5 minutes
+
+def cleanup_expired_pending():
+    """Remove expired pending confirmations (run in background occasionally)."""
+    with PENDING_LOCK:
+        now = datetime.utcnow()
+        expired_keys = [k for k, v in PENDING_CONFIRMATIONS.items() if v["expires_at"] <= now]
+        for k in expired_keys:
+            del PENDING_CONFIRMATIONS[k]
+
+@app.post("/diagnostic/chat")
+def chat_with_diagnostic_agent(req: IssueRequest):
+    try:
+        runbook_name = diagnostic_process_issue(req.issue)
+
+        if not runbook_name:
+            raise HTTPException(status_code=404, detail="No runbook name found from diagnostic agent.")
+
+        if req.execute:
+            create_new_runbook(runbook_name, req.target_machine)
+            return {"runbook_name": runbook_name,
+                    "message": f"Runbook '{runbook_name}' executed on {req.target_machine}"}
+
+        return {"runbook_name": runbook_name, "message": "Runbook ready but not executed."}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-def extract_runbook_name(full_text):
+@app.post("/troubleshooting/chat")
+def chat_with_troubleshooting_agent(req: IssueRequest):
     """
-    Extract only the runbook name from the beginning of the response.
-    Example incoming:
-        "Troubleshoot_KB0010265 – Cannot Open Outlook..."
-    Output:
-        "Troubleshoot_KB0010265"
+    Two-step troubleshooting flow:
+      - If request.issue is an affirmative ("yes"/"y") (case-insensitive), we look up the pending confirmation
+        for req.target_machine and, if found, execute the runbook and return execution message.
+      - Otherwise: call the troubleshooting agent to get the runbook name and full_text, store a pending
+        confirmation and return the message + a next_step prompt asking the user to confirm running the runbook.
+    The JSON responses are kept simple and match the requested format.
     """
-    if not full_text:
-        return None
+    try:
+        # Clean expired pendings first
+        cleanup_expired_pending()
 
-    # First line only
-    first_line = full_text.split("\n")[0]
+        user_issue_normalized = (req.issue or "").strip().lower()
 
-    # Split before dash or long text
-    clean = first_line.split("–")[0].split("-")[0].strip()
+        # If user replied "yes" (confirmation) -> execute the pending runbook for this target_machine
+        if user_issue_normalized in ("yes", "y"):
+            with PENDING_LOCK:
+                pending = PENDING_CONFIRMATIONS.get(req.target_machine)
+                if not pending:
+                    raise HTTPException(status_code=404, detail="No pending runbook confirmation found for this target machine. Please request troubleshooting first.")
+                runbook_name = pending["runbook_name"]
 
-    return clean
+                # Remove pending immediately to avoid double execution
+                del PENDING_CONFIRMATIONS[req.target_machine]
+
+            # Execute runbook now
+            create_new_runbook(runbook_name, req.target_machine)
+            return {"message": f"Runbook executed on {req.target_machine}"}
+
+        # Otherwise: treat this as initial troubleshooting request
+        clean_name, full_text = troubleshooting_process_issue(req.issue)
+
+        if not clean_name:
+            raise HTTPException(status_code=404, detail="No runbook name found from troubleshooting agent.")
+
+        # Store pending confirmation (only if execute flag is True the user expects to run it later)
+        if req.execute:
+            with PENDING_LOCK:
+                PENDING_CONFIRMATIONS[req.target_machine] = {
+                    "runbook_name": clean_name,
+                    "full_text": full_text,
+                    "expires_at": datetime.utcnow() + timedelta(seconds=PENDING_TTL_SECONDS)
+                }
+
+        # Respond with message and next_step prompt as requested
+        next_step_text = (
+            f"Do you want me to fix this issue automatically by running runbook '{clean_name}' (yes/no)?"
+        )
+
+        return {
+            "message": full_text,
+            "next_step": next_step_text
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-def process_issue(issue):
-    # Create cloud thread
-    thread = project.agents.threads.create()
-    project.agents.messages.create(
-        thread_id=thread.id,
-        role="user",
-        content=issue
-    )
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "message": "API is running"}
 
-    # Process the response
-    run = project.agents.runs.create_and_process(
-        thread_id=thread.id,
-        agent_id=agent.id
-    )
-
-    if run.status == "failed":
-        print(f"Run failed: {run.last_error}")
-        return None, None
-
-    # Get messages
-    messages = project.agents.messages.list(thread_id=thread.id, order=ListSortOrder.ASCENDING)
-
-    full_text = None
-    for message in messages:
-        if message.text_messages:
-            full_text = message.text_messages[-1].text.value
-
-    if not full_text:
-        return None, None
-
-    clean_name = extract_runbook_name(full_text)
-
-    return clean_name, full_text   
-
-Retrieving script from existing runbook: Troubleshoot_KB0010265
-No draft version found or error reading draft: 'IO'
-Could not fetch published runbook content: 'IO'
-Trying to fetch using REST API fallback method.
-Successfully fetched content for Troubleshoot_KB0010265
-Runbook file created locally: generated_runbooks\Troubleshoot_KB0010265_demo_syetem_20251110_170055.ps1
-Runbook created in Azure Automation: Troubleshoot_KB0010265_demo_syetem_20251110_170055
-Runbook content uploaded successfully for: Troubleshoot_KB0010265_demo_syetem_20251110_170055.ps1
-Runbook published successfully: Troubleshoot_KB0010265_demo_syetem_20251110_170055.ps1
-{
-    "runbook_name": "Troubleshoot_KB0010265",
-    "message": "Troubleshoot_KB0010265 – Cannot Open Microsoft Outlook. This issue prevents Outlook from launching correctly; I’m now performing the following steps:\n1. Check for corrupted OST files and rebuild if needed\n2. Reset Outlook startup configuration\n3. Repair Outlook profile and launch settings\n\n Runbook executed on demo_syetem"
-}
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

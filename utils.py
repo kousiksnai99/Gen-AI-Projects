@@ -142,19 +142,4 @@ def create_new_runbook(runbook_name, system_name):
         ).result()
         print(f"Runbook published successfully: {file_name}")
     except Exception as e:
-        print(f"Error publishing runbook: {e}")
-
-def sanitize_runbook_name(name: str) -> str:
-    """
-    Ensures runbook names are Azure Automation compatible.
-    Converts sentences to safe names.
-    """
-    import re
-    name = name.strip()
-    name = re.sub(r'[^A-Za-z0-9_\-]', '_', name)  # replace special chars
-    name = re.sub(r'_+', '_', name)  # clean multiple underscores
-    if name[0].isdigit():
-        name = "Runbook_" + name
-    return name[:127]  # Azure name length limit
-        
-
+        print(f"Error publishing runbook: {e}")    

@@ -1,81 +1,69 @@
-#################################################################################################
-## Project name : Agentic AI POC - Utilities                                                  #
-## Business owner, Team : Data and AIA                                                         #
-## Notebook Author, Team: POC Team                                                            #
-## Date: 2025-11-12                                                                           #
-## Purpose of File: Helpers for runbook management, content retrieval, telemetry, and logging. ##
-## Connections: Used by main.py and agents.                                                    #
+################################################################################################# 
+## Project name : Agentic AI POC                                                                #
+## Business owner , Team : Data and AIA                                                         #
+## Notebook Author , Team: POC Team                                                             #
+## Date: 2025-10-29                                                                              #
+## Purpose of Notebook: Utility helpers for runbook retrieval, validation and creation.         #
+## Connections: Called by main.py to perform create_new_runbook, and diagnostic/troubleshooting #
+## Notes: This file intentionally does NOT add any external integrations (KeyVault/EventHub).    #
 #################################################################################################
 
+from __future__ import annotations
+
 ###############  IMPORT PACKAGES  ###############
-from datetime import datetime
 import os
-import logging
+from datetime import datetime
+from typing import Optional
+
+from logger_config import get_logger
+
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.automation import AutomationClient
 import requests
+
 import config
+##################################################
 
-# Optional Event Hub telemetry
-try:
-    from azure.eventhub import EventHubProducerClient, EventData
-except Exception:
-    EventHubProducerClient = None
-    EventData = None
+logger = get_logger(__name__)
 
-###############  LOGGER  ###############
-logger = logging.getLogger("utils")
+# ###############  SETTINGS & CONSTANTS ###############
+GENERATED_RUNBOOKS_DIR = os.getenv("GENERATED_RUNBOOKS_DIR", "generated_runbooks")
+RUNBOOK_API_VERSION = os.getenv("AZURE_RUNBOOK_API_VERSION", "2024-10-23")
+# #####################################################
 
-# Ensure a default credential is available (prefer managed identity)
-try:
-    _credential = DefaultAzureCredential()
-    logger.info("DefaultAzureCredential initialized for utils.")
-except Exception as e:
-    logger.exception("Could not initialize DefaultAzureCredential: %s", e)
-    _credential = None
+# Ensure output directory exists
+os.makedirs(GENERATED_RUNBOOKS_DIR, exist_ok=True)
 
-###############  CONSTANTS  ###############
-RUNBOOK_API_VERSION = "2024-10-23"
 
-###############  HELPERS: EventHub telemetry (optional)  ###############
-def send_telemetry_event(payload: dict):
+def validate_runbook_name(candidate_name: str) -> bool:
     """
-    Send a telemetry event to Event Hub if configured. Non-blocking best-effort.
-    payload: plain JSON-serializable dict
+    Basic validation for runbook names to detect obviously invalid results from agents.
+    Rules (best-effort):
+      - non-empty
+      - length limit
+      - allowed characters (letters, numbers, underscore, dash)
+    This does NOT enforce Azure naming rules exactly; it is a simple guardrail.
     """
-    try:
-        if not config.EVENTHUB_CONNECTION_STRING or not config.EVENTHUB_NAME:
-            logger.debug("EventHub not configured; skipping telemetry send.")
-            return
+    if not candidate_name or not isinstance(candidate_name, str):
+        return False
+    trimmed = candidate_name.strip()
+    if len(trimmed) == 0 or len(trimmed) > 200:
+        return False
+    # allow letters, numbers, underscores, dashes, and spaces (space trimmed)
+    for ch in trimmed:
+        if not (ch.isalnum() or ch in ("_", "-", " ")):
+            return False
+    return True
 
-        if EventHubProducerClient is None:
-            logger.debug("azure-eventhub package not available; skipping telemetry send.")
-            return
 
-        producer = EventHubProducerClient.from_connection_string(conn_str=config.EVENTHUB_CONNECTION_STRING, eventhub_name=config.EVENTHUB_NAME)
-        event = EventData(str(payload))
-        with producer:
-            producer.send_batch([event])
-        logger.info("Telemetry event sent to EventHub: %s", payload)
-    except Exception as e:
-        # Telemetry failures must not break main flows
-        logger.exception("Failed to send telemetry event: %s", e)
-
-###############  HELPER: get_source_content via REST fallback  ###############
-def get_source_content(runbook_name: str):
+def get_source_content_via_rest(runbook_name: str) -> Optional[str]:
     """
-    Fetch runbook content directly from Azure REST API (draft or published).
-    Returns runbook content string or None.
+    Fetch runbook content directly from Azure REST API fallback.
+    This function mirrors previous get_source_content behavior and will use
+    DefaultAzureCredential to obtain tokens.
     """
-    if not _credential:
-        logger.warning("No credential available to call management REST API.")
-        return None
-
-    try:
-        token = _credential.get_token("https://management.azure.com/.default").token
-    except Exception as e:
-        logger.exception("Failed to acquire management token: %s", e)
-        return None
+    credential = DefaultAzureCredential()
+    token = credential.get_token("https://management.azure.com/.default").token
 
     url = (
         f"https://management.azure.com/subscriptions/{config.SUBSCRIPTION_ID}"
@@ -89,42 +77,47 @@ def get_source_content(runbook_name: str):
         "Accept": "application/octet-stream"
     }
 
-    try:
-        response = requests.get(url, headers=headers, timeout=30)
-        if response.status_code == 200:
-            runbook_content = response.content.decode("utf-8", errors="ignore")
-            logger.info("Successfully fetched content for %s via REST API", runbook_name)
-            return runbook_content
-        else:
-            logger.warning("Failed to fetch content for %s: %s - %s", runbook_name, response.status_code, response.text)
-            return None
-    except Exception as e:
-        logger.exception("Exception while fetching runbook content via REST: %s", e)
+    response = requests.get(url, headers=headers)
+
+    if response.status_code == 200:
+        runbook_content = response.content.decode("utf-8", errors="ignore")
+        logger.info("Successfully fetched content for runbook '%s' using REST fallback", runbook_name)
+        return runbook_content
+    else:
+        logger.warning("Failed to fetch content for %s via REST fallback: %s - %s", runbook_name, response.status_code, response.text)
         return None
 
-###############  PUBLIC: create_new_runbook  ###############
-def create_new_runbook(runbook_name: str, system_name: str):
+
+def create_new_runbook(runbook_name: str, system_name: str) -> None:
     """
-    Create a new runbook in the Azure Automation Account by copying content from an existing runbook.
-    This preserves the original behaviour but adds robust logging, optional REST fallback, and local file creation.
+    Create a new runbook in Azure Automation by copying from an existing runbook.
+
+    Steps:
+      1. Attempt to read the draft content via AutomationClient.runbook_draft.get_content.
+      2. If that fails, attempt to read published content via AutomationClient.runbook.get_content.
+      3. If both fail, attempt REST fallback (get_source_content_via_rest).
+      4. If still nothing, generate a minimal runbook stub locally.
+      5. Create new runbook with a timestamped name under generated_runbooks directory and push to Azure Automation.
     """
-    if not _credential:
-        logger.warning("No credential available - create_new_runbook cannot proceed.")
+    if not runbook_name:
+        logger.error("create_new_runbook called with empty runbook_name.")
         return
 
-    client = AutomationClient(_credential, config.SUBSCRIPTION_ID)
-    time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if not validate_runbook_name(runbook_name):
+        logger.warning("Runbook name '%s' did not pass validation; continuing but recording issue.", runbook_name)
 
-    os.makedirs("generated_runbooks", exist_ok=True)
+    credential = DefaultAzureCredential()
+    client = AutomationClient(credential, config.SUBSCRIPTION_ID)
+    time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     new_runbook_name = f"{runbook_name}_{system_name}_{time_stamp}"
     file_name = f"{new_runbook_name}.ps1"
-    file_path = os.path.join("generated_runbooks", file_name)
+    file_path = os.path.join(GENERATED_RUNBOOKS_DIR, file_name)
 
     logger.info("Retrieving script from existing runbook: %s", runbook_name)
-    source_script = None
+    source_script: Optional[str] = None
 
-    # Try to read draft content first
+    # Try draft content
     try:
         content_stream = client.runbook_draft.get_content(
             resource_group_name=config.RESOURCE_GROUP,
@@ -136,10 +129,10 @@ def create_new_runbook(runbook_name: str, system_name: str):
         else:
             source_script = str(content_stream)
         logger.info("Successfully retrieved draft content from runbook: %s", runbook_name)
-    except Exception as e:
-        logger.debug("No draft version found or error reading draft: %s", e)
+    except Exception as exc:
+        logger.debug("No draft version found or error reading draft for runbook %s: %s", runbook_name, exc)
 
-    # Try published runbook content
+    # Try published content if draft didn't work
     if not source_script:
         try:
             content_stream = client.runbook.get_content(
@@ -152,28 +145,28 @@ def create_new_runbook(runbook_name: str, system_name: str):
             else:
                 source_script = str(content_stream)
             logger.info("Successfully retrieved published content from runbook: %s", runbook_name)
-        except Exception as e:
-            logger.debug("Could not fetch published runbook content: %s", e)
-            logger.info("Trying REST API fallback to fetch runbook content.")
-            source_script = get_source_content(runbook_name)
+        except Exception as exc:
+            logger.debug("Could not fetch published runbook content for %s: %s", runbook_name, exc)
+            logger.info("Trying to fetch using REST API fallback method for runbook: %s", runbook_name)
+            source_script = get_source_content_via_rest(runbook_name)
 
-    # If still not available, generate a minimal runbook scaffold
+    # If still no script, generate a minimal stub
     if not source_script:
         source_script = (
             f"# Auto-generated Runbook\n# Name: {file_name}\n# System: {system_name}\n"
             f"# Created: {time_stamp}\n\nWrite-Output 'Running {file_name}'\n"
         )
-        logger.warning("Using auto-generated fallback runbook content for %s", runbook_name)
+        logger.warning("No source script could be fetched; creating minimal stub for %s", new_runbook_name)
 
-    # Save to local file for auditing / packaging
+    # Write to local file (so there's a record even if Azure operations fail)
     try:
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(source_script)
         logger.info("Runbook file created locally: %s", file_path)
-    except Exception as e:
-        logger.exception("Failed to write local runbook file: %s", e)
+    except Exception as exc:
+        logger.exception("Failed to write runbook file %s: %s", file_path, exc)
 
-    # Create runbook record in Azure Automation
+    # Create runbook in Azure Automation and upload content; if errors occur, log them
     try:
         runbook = client.runbook.create_or_update(
             resource_group_name=config.RESOURCE_GROUP,
@@ -190,11 +183,11 @@ def create_new_runbook(runbook_name: str, system_name: str):
             },
         )
         logger.info("Runbook created in Azure Automation: %s", getattr(runbook, "name", new_runbook_name))
-    except Exception as e:
-        logger.exception("Error creating runbook in Azure Automation: %s", e)
-        return
+    except Exception as exc:
+        logger.exception("Error creating runbook in Azure Automation: %s", exc)
+        # Do not raise to preserve previous behavior; calling code expects create_new_runbook to be non-fatal
 
-    # Replace content using the draft API and publish
+    # Replace draft content
     try:
         poller = client.runbook_draft.begin_replace_content(
             resource_group_name=config.RESOURCE_GROUP,
@@ -204,9 +197,10 @@ def create_new_runbook(runbook_name: str, system_name: str):
         )
         poller.result()
         logger.info("Runbook content uploaded successfully for: %s", file_name)
-    except Exception as e:
-        logger.exception("Error replacing runbook content: %s", e)
+    except Exception as exc:
+        logger.exception("Error replacing runbook content for %s: %s", new_runbook_name, exc)
 
+    # Publish runbook
     try:
         client.runbook.begin_publish(
             resource_group_name=config.RESOURCE_GROUP,
@@ -214,26 +208,5 @@ def create_new_runbook(runbook_name: str, system_name: str):
             runbook_name=new_runbook_name
         ).result()
         logger.info("Runbook published successfully: %s", file_name)
-    except Exception as e:
-        logger.exception("Error publishing runbook: %s", e)
-
-    # Send telemetry event
-    send_telemetry_event({"event": "runbook_created", "runbook": new_runbook_name, "system": system_name})
-
-###############  DATA VALIDATION (BASIC)  ###############
-def validate_runbook_metadata(runbook_content: str):
-    """
-    Basic placeholder data validation for runbook content.
-    Extend this to assert expected parameters, module imports, or schema.
-    Returns True if validation passes, False otherwise.
-    """
-    if not runbook_content:
-        logger.warning("validate_runbook_metadata: empty content")
-        return False
-    # Example check: ensure the runbook contains a descriptive header and at least one Write-Output
-    header_present = "#" in runbook_content[:200]
-    has_write_output = "Write-Output" in runbook_content or "Write-Host" in runbook_content
-    valid = header_present and has_write_output
-    logger.debug("validate_runbook_metadata -> header_present=%s, has_write_output=%s, valid=%s",
-                 header_present, has_write_output, valid)
-    return valid
+    except Exception as exc:
+        logger.exception("Error publishing runbook: %s", exc)

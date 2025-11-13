@@ -1,70 +1,73 @@
 #################################################################################################
-## Project Name: Agentic AI POC                                                                ##
-## Business Owner / Team: Data and AIA                                                         ##
-## Author / Team: POC Team                                                                     ##
-## Date: 29th Oct 2025                                                                         ##
-## Purpose: Troubleshooting Agent to identify and confirm automated runbook actions.           ##
-## Dependencies: config.py                                                                     ##
+## Project name : Agentic AI POC                                                                #
+## Purpose: Troubleshooting Agent                                                               #
 #################################################################################################
 
-###############  IMPORT PACKAGES  ###############
 from azure.ai.projects import AIProjectClient
 from azure.identity import AzureCliCredential
 from azure.ai.agents.models import ListSortOrder
 import config
-import logging
 
-###############  LOGGING CONFIGURATION  ###############
-logging.basicConfig(
-    filename="agent_api.log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
-###############  INITIALIZE AGENT  ###############
+# Initialize AI Project
 project = AIProjectClient(
     credential=AzureCliCredential(),
     endpoint=config.MODEL_ENDPOINT
 )
+
+# Load Troubleshooting Agent
 agent = project.agents.get_agent(config.TROUBLESHOOTING_AGENT_ID)
 
 
-###############  HELPER FUNCTIONS  ###############
 def extract_runbook_name(full_text):
-    """Extract only the runbook name from the beginning of the agent response."""
+    """
+    Extract only the runbook name from the beginning of the response.
+    Example incoming:
+        "Troubleshoot_KB0010265 – Cannot Open Outlook..."
+    Output:
+        "Troubleshoot_KB0010265"
+    """
     if not full_text:
         return None
+
+    # First line only
     first_line = full_text.split("\n")[0]
+
+    # Split before dash or long text
     clean = first_line.split("–")[0].split("-")[0].strip()
+
     return clean
 
 
-###############  CORE FUNCTION  ###############
 def process_issue(issue):
-    """Process a troubleshooting issue and return a runbook suggestion."""
-    try:
-        thread = project.agents.threads.create()
-        project.agents.messages.create(thread_id=thread.id, role="user", content=issue)
+    # Create cloud thread
+    thread = project.agents.threads.create()
+    project.agents.messages.create(
+        thread_id=thread.id,
+        role="user",
+        content=issue
+    )
 
-        run = project.agents.runs.create_and_process(thread_id=thread.id, agent_id=agent.id)
-        if run.status == "failed":
-            logging.error(f"Troubleshooting run failed: {run.last_error}")
-            return None, None
+    # Process the response
+    run = project.agents.runs.create_and_process(
+        thread_id=thread.id,
+        agent_id=agent.id
+    )
 
-        messages = project.agents.messages.list(thread_id=thread.id, order=ListSortOrder.ASCENDING)
-        full_text = None
-        for message in messages:
-            if message.text_messages:
-                full_text = message.text_messages[-1].text.value
-
-        if not full_text:
-            logging.warning("No troubleshooting text received.")
-            return None, None
-
-        clean_name = extract_runbook_name(full_text)
-        logging.info(f"Troubleshooting agent suggested runbook: {clean_name}")
-        return clean_name, full_text
-
-    except Exception as e:
-        logging.error(f"Error in troubleshooting process: {e}")
+    if run.status == "failed":
+        print(f"Run failed: {run.last_error}")
         return None, None
+
+    # Get messages
+    messages = project.agents.messages.list(thread_id=thread.id, order=ListSortOrder.ASCENDING)
+
+    full_text = None
+    for message in messages:
+        if message.text_messages:
+            full_text = message.text_messages[-1].text.value
+
+    if not full_text:
+        return None, None
+
+    clean_name = extract_runbook_name(full_text)
+
+    return clean_name, full_text

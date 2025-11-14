@@ -64,4 +64,29 @@ def main():
 
 if __name__ == "__main__":
     main()
-Test-NetConnection ehn-hrmqc-ais-swce-poc.servicebus.windows.net -Port 5671
+
+
+
+Creating event batch...
+Traceback (most recent call last):
+  File "F:\Kousik\helpdesk_assistant\eventhub_send.py", line 32, in <module>
+    main()
+    ~~~~^^
+  File "F:\Kousik\helpdesk_assistant\eventhub_send.py", line 21, in main
+    event_data_batch = producer.create_batch()
+  File "C:\Users\KSNAI\AppData\Local\Programs\Python\Python313\Lib\site-packages\azure\eventhub\_producer_client.py", line 799, in create_batch
+    self._get_max_message_size()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\KSNAI\AppData\Local\Programs\Python\Python313\Lib\site-packages\azure\eventhub\_producer_client.py", line 355, in _get_max_message_size
+    cast(EventHubProducer, self._producers[ALL_PARTITIONS])._open_with_retry()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\KSNAI\AppData\Local\Programs\Python\Python313\Lib\site-packages\azure\eventhub\_producer.py", line 147, in _open_with_retry
+    return self._do_retryable_operation(self._open, operation_need_param=False)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\KSNAI\AppData\Local\Programs\Python\Python313\Lib\site-packages\azure\eventhub\_client_base.py", line 608, in _do_retryable_operation
+    raise last_exception from None
+azure.eventhub.exceptions.AuthenticationError: CBS Token authentication failed.
+Status code: None
+Error: client-error
+CBS Token authentication failed.
+Status code: None

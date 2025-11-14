@@ -32,56 +32,36 @@ az login
 az account set --subscription "AZ-SUB-POC-AIS"
 
 
-from azure.eventhub import EventHubProducerClient, EventData
+from azure.eventhub import EventHubProducerClient, EventData, TransportType
 from azure.identity import DefaultAzureCredential
 
-# Your namespace + event hub name
+# Event Hub namespace + name
 NAMESPACE = "ehn-hrmqc-ais-swce-poc.servicebus.windows.net"
 EVENTHUB_NAME = "ehn-hrmqc-ais-swce-poc"
 
 def main():
-    # Use your Azure AD identity
+    # Authenticate using your Azure AD login
     credential = DefaultAzureCredential()
 
+    # Create producer client using WebSockets (port 443)
     producer = EventHubProducerClient(
         fully_qualified_namespace=NAMESPACE,
         eventhub_name=EVENTHUB_NAME,
-        credential=credential
+        credential=credential,
+        transport_type=TransportType.AmqpOverWebsocket    # <-- important for VDI
     )
 
-    # Create event batch
+    print("Creating event batch...")
     event_data_batch = producer.create_batch()
-    event_data_batch.add(EventData("Hello Event Hub using AAD authentication!"))
 
-    # Send
+    # Add messages
+    event_data_batch.add(EventData("Hello Event Hub from AAD over WebSockets!"))
+
+    print("Sending event...")
     producer.send_batch(event_data_batch)
 
-    print("Event sent successfully using AAD!")
+    print("Event sent successfully!")
 
 if __name__ == "__main__":
     main()
-
-
-python eventhub_send.py
-Traceback (most recent call last):
-  File "F:\Kousik\helpdesk_assistant\eventhub_send.py", line 28, in <module>
-    main()
-    ~~~~^^
-  File "F:\Kousik\helpdesk_assistant\eventhub_send.py", line 19, in main
-    event_data_batch = producer.create_batch()
-  File "C:\Users\KSNAI\AppData\Local\Programs\Python\Python313\Lib\site-packages\azure\eventhub\_producer_client.py", line 799, in create_batch
-    self._get_max_message_size()
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^
-  File "C:\Users\KSNAI\AppData\Local\Programs\Python\Python313\Lib\site-packages\azure\eventhub\_producer_client.py", line 355, in _get_max_message_size
-    cast(EventHubProducer, self._producers[ALL_PARTITIONS])._open_with_retry()
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
-  File "C:\Users\KSNAI\AppData\Local\Programs\Python\Python313\Lib\site-packages\azure\eventhub\_producer.py", line 147, in _open_with_retry
-    return self._do_retryable_operation(self._open, operation_need_param=False)
-           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\KSNAI\AppData\Local\Programs\Python\Python313\Lib\site-packages\azure\eventhub\_client_base.py", line 608, in _do_retryable_operation
-    raise last_exception from None
-azure.eventhub.exceptions.ConnectError: Failed to initiate the connection due to exception: timed out
-Error condition: ErrorCondition.SocketError
- Error Description: Failed to initiate the connection due to exception: timed out
-
-
+Test-NetConnection ehn-hrmqc-ais-swce-poc.servicebus.windows.net -Port 5671

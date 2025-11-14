@@ -28,5 +28,14 @@ ehn-hrmqc-ais-swce-poc
 SAS Policy ARM ID:
 /subscriptions/4c85c528-9da9-48ac-a5c3-41bd351728eb/resourceGroups/rg-fbntf-ais-swce-poc/providers/Microsoft.EventHub/namespaces/ehn-hrmqc-ais-swce-poc/authorizationrules/RootManageSharedAccessKey
 
+az login
+az account set --subscription "AZ-SUB-POC-AIS"
+
+
+az eventhubs namespace authorization-rule keys list \
+  --resource-group rg-fbntf-ais-swce-poc \
+  --namespace-name ehn-hrmqc-ais-swce-poc \
+  --name RootManageSharedAccessKey \
+  --query primaryConnectionString -o tsv
 
 

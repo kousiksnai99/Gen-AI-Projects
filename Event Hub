@@ -1,0 +1,32 @@
+Event Hub Configuration
+
+
+Resource Group:
+rg-fbntf-ais-swce-poc
+
+
+Subscription Name:
+AZ-SUB-POC-AIS
+
+
+Subscription ID:
+4c85c528-9da9-48ac-a5c3-41bd351728eb
+
+
+Location:
+Sweden Central
+
+
+Namespace Host Name:
+ehn-hrmqc-ais-swce-poc.servicebus.windows.net
+
+
+Event Hub Name:
+ehn-hrmqc-ais-swce-poc
+
+
+SAS Policy ARM ID:
+/subscriptions/4c85c528-9da9-48ac-a5c3-41bd351728eb/resourceGroups/rg-fbntf-ais-swce-poc/providers/Microsoft.EventHub/namespaces/ehn-hrmqc-ais-swce-poc/authorizationrules/RootManageSharedAccessKey
+
+
+

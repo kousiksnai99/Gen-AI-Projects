@@ -5,28 +5,38 @@
 ## Date           : 29th Oct 2025
 ##
 ## Description:
-##   This script defines the Troubleshooting Agent, which interacts with an Azure AI Agent
-##   to analyze user-provided issue descriptions and suggest the appropriate runbook for
-##   automated issue resolution.
+##   This module defines the Troubleshooting Agent that interacts with an Azure AI Agent
+##   to analyze issue descriptions and provide the recommended runbook for automated resolution.
 ##
-##   Key Responsibilities:
-##     - Send troubleshooting issues to the Azure AI agent.
-##     - Retrieve AI-generated responses and extract the runbook name.
-##     - Return both the cleaned runbook name and full AI message for downstream execution.
+## Key Responsibilities:
+##   - Submit user troubleshooting input to the Azure AI Agent
+##   - Retrieve generated AI messages
+##   - Extract and return the runbook name + full AI response
+##
+## Notes:
+##   - This file follows the DSET standardization guidelines.
+##   - No new integrations or architectural changes were added per request.
 #################################################################################################
 
-# -----------------------------------------------------------------------------------------------
-# Library Imports
-# -----------------------------------------------------------------------------------------------
+
+# ###############  IMPORT PACKAGES  ###############
+import logging
 from azure.ai.projects import AIProjectClient
 from azure.identity import AzureCliCredential
 from azure.ai.agents.models import ListSortOrder
 import config
 
-# -----------------------------------------------------------------------------------------------
-# Azure AI Project Initialization
-# -----------------------------------------------------------------------------------------------
-# Create an AI project client using Azure CLI credentials
+
+# ###############  LOGGING CONFIGURATION ###############
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
+)
+logger = logging.getLogger("troubleshooting_agent")
+
+
+# ###############  AZURE AI PROJECT INITIALIZATION ###############
+# Azure AI Project Client using CLI Credential
 ai_project_client = AIProjectClient(
     credential=AzureCliCredential(),
     endpoint=config.MODEL_ENDPOINT
@@ -35,103 +45,109 @@ ai_project_client = AIProjectClient(
 # Load the configured Troubleshooting Agent
 troubleshooting_agent = ai_project_client.agents.get_agent(config.TROUBLESHOOTING_AGENT_ID)
 
-# -----------------------------------------------------------------------------------------------
-# Function: extract_runbook_name
-# -----------------------------------------------------------------------------------------------
+
+# ###############  FUNCTION: extract_runbook_name ###############
 def extract_runbook_name(full_text: str) -> str | None:
     """
-    Extract the runbook name from the beginning of the AI agent response.
+    Extracts the runbook name from the AI response text.
 
     Example:
         Input  -> "Troubleshoot_KB0010265 – Cannot Open Outlook..."
         Output -> "Troubleshoot_KB0010265"
 
     Args:
-        full_text (str): Full response text returned by the troubleshooting agent.
+        full_text (str):
+            The complete response text from the troubleshooting agent.
 
     Returns:
-        str | None: Extracted runbook name if found, otherwise None.
+        str | None:
+            The extracted runbook name, or None if extraction fails.
     """
     if not full_text:
         return None
 
-    # Consider only the first line of the AI response
+    # Use only the first line of AI response
     first_line = full_text.split("\n")[0]
 
-    # Split before dash or en dash to isolate the runbook name
-    clean_name = first_line.split("–")[0].split("-")[0].strip()
+    # Split on dash or en dash to isolate runbook name
+    runbook_name = first_line.split("–")[0].split("-")[0].strip()
 
-    return clean_name
+    return runbook_name
 
-# -----------------------------------------------------------------------------------------------
-# Function: process_issue
-# -----------------------------------------------------------------------------------------------
+
+# ###############  FUNCTION: process_issue ###############
 def process_issue(issue: str) -> tuple[str | None, str | None]:
     """
-    Send a troubleshooting issue to the Azure AI Troubleshooting Agent and
-    retrieve the suggested runbook name along with the full explanation.
+    Sends a troubleshooting issue to the Azure AI Troubleshooting Agent
+    and returns the suggested runbook name along with the full AI message.
 
     Args:
-        issue (str): The issue description provided by the user.
+        issue (str):
+            The user-provided issue description.
 
     Returns:
         tuple[str | None, str | None]:
-            clean_runbook_name: The extracted runbook name (if available).
-            full_response_text: The full AI-generated troubleshooting message.
+            clean_runbook_name : Extracted runbook name
+            full_response_text : Full AI-generated troubleshooting output
     """
     try:
-        # ---------------------------------------------------------------------------------------
-        # Step 1: Create a new thread for this troubleshooting session
-        # ---------------------------------------------------------------------------------------
-        thread = ai_project_client.agents.threads.create()
+        logger.info("Processing troubleshooting issue: %s", issue)
 
-        # ---------------------------------------------------------------------------------------
-        # Step 2: Add the user's issue as a message in the thread
-        # ---------------------------------------------------------------------------------------
+        # ---------------------------------------------
+        # Step 1: Create a new thread for conversation
+        # ---------------------------------------------
+        thread = ai_project_client.agents.threads.create()
+        logger.debug("Created troubleshooting thread: %s", thread.id)
+
+        # ---------------------------------------------
+        # Step 2: Post the user's issue to the thread
+        # ---------------------------------------------
         ai_project_client.agents.messages.create(
             thread_id=thread.id,
             role="user",
             content=issue
         )
 
-        # ---------------------------------------------------------------------------------------
-        # Step 3: Trigger the agent to process the issue
-        # ---------------------------------------------------------------------------------------
+        # ---------------------------------------------
+        # Step 3: Process the thread using the AI agent
+        # ---------------------------------------------
         run = ai_project_client.agents.runs.create_and_process(
             thread_id=thread.id,
             agent_id=troubleshooting_agent.id
         )
 
-        # Handle failure scenarios
         if run.status == "failed":
-            print(f"[ERROR] Troubleshooting run failed: {run.last_error}")
+            logger.error("Troubleshooting agent run failed: %s", run.last_error)
             return None, None
 
-        # ---------------------------------------------------------------------------------------
-        # Step 4: Retrieve messages from the thread in chronological order
-        # ---------------------------------------------------------------------------------------
+        # ---------------------------------------------
+        # Step 4: Retrieve agent messages in order
+        # ---------------------------------------------
         messages = ai_project_client.agents.messages.list(
             thread_id=thread.id,
             order=ListSortOrder.ASCENDING
         )
 
         full_response_text = None
+
         for message in messages:
             if message.text_messages:
-                # Capture the last AI response text
+                # Capture last text message
                 full_response_text = message.text_messages[-1].text.value
 
         if not full_response_text:
-            print("[INFO] No text response received from troubleshooting agent.")
+            logger.info("No response text received from troubleshooting agent.")
             return None, None
 
-        # ---------------------------------------------------------------------------------------
-        # Step 5: Extract the runbook name from the AI response
-        # ---------------------------------------------------------------------------------------
+        # ---------------------------------------------
+        # Step 5: Extract runbook name from response
+        # ---------------------------------------------
         clean_runbook_name = extract_runbook_name(full_response_text)
+
+        logger.info("Troubleshooting agent returned runbook: %s", clean_runbook_name)
 
         return clean_runbook_name, full_response_text
 
-    except Exception as e:
-        print(f"[EXCEPTION] Failed to process troubleshooting issue: {e}")
+    except Exception as exc:
+        logger.exception("Exception while processing troubleshooting issue: %s", exc)
         return None, None

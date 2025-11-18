@@ -5,123 +5,136 @@
 ## Date           : 29th Oct 2025
 ##
 ## Purpose:
-##   This script contains helper functions that interact with Azure Automation (AA)
-##   to fetch, duplicate, and publish runbooks programmatically.
+##   Helper utilities that interact with Azure Automation to:
+##     - Retrieve runbook content (draft, published, or REST fallback)
+##     - Duplicate existing runbooks
+##     - Upload and publish new runbooks programmatically
 ##
-##   Key Functionalities:
-##     - Retrieve existing runbook content (draft, published, or via REST fallback).
-##     - Create new runbooks by copying existing ones with timestamped names.
-##     - Upload and publish new runbooks in Azure Automation.
+## Notes:
+##   - This file follows DSET standardization.
+##   - No new features or workflow changes were introduced.
 #################################################################################################
 
-# -----------------------------------------------------------------------------------------------
-# Library Imports
-# -----------------------------------------------------------------------------------------------
+
+# ###############  IMPORTS  ###############
 import os
+import logging
 import requests
 from datetime import datetime
+
 from azure.identity import DefaultAzureCredential
 from azure.mgmt.automation import AutomationClient
+
 import config
 
-# -----------------------------------------------------------------------------------------------
-# Function: get_source_content
-# -----------------------------------------------------------------------------------------------
+
+# ###############  LOGGING SETUP ###############
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
+)
+logger = logging.getLogger("automation_helpers")
+
+
+# ###############  FUNCTION: get_source_content ###############
 def get_source_content(runbook_name: str) -> str | None:
     """
-    Fetch the content of an existing runbook from Azure Automation using the REST API.
-
-    This function supports both Draft and Published runbook versions.
+    Fetch the content of a runbook from Azure Automation using the REST API.
+    This method is used as fallback when draft/published versions cannot be retrieved.
 
     Args:
-        runbook_name (str): Name of the existing runbook in Azure Automation.
+        runbook_name (str): Existing runbook name in Azure Automation.
 
     Returns:
-        str | None: The decoded runbook script content if fetched successfully,
-                    otherwise None.
+        str | None: Script content if fetched successfully, else None.
     """
-    credential = DefaultAzureCredential()
-    token = credential.get_token("https://management.azure.com/.default").token
+    try:
+        credential = DefaultAzureCredential()
+        token = credential.get_token("https://management.azure.com/.default").token
 
-    # Construct the Azure REST API endpoint URL
-    url = (
-        f"https://management.azure.com/subscriptions/{config.SUBSCRIPTION_ID}"
-        f"/resourceGroups/{config.RESOURCE_GROUP}"
-        f"/providers/Microsoft.Automation/automationAccounts/{config.AUTOMATION_ACCOUNT}"
-        f"/runbooks/{runbook_name}/content?api-version=2024-10-23"
-    )
+        # Construct REST API endpoint
+        url = (
+            f"https://management.azure.com/subscriptions/{config.SUBSCRIPTION_ID}"
+            f"/resourceGroups/{config.RESOURCE_GROUP}"
+            f"/providers/Microsoft.Automation/automationAccounts/{config.AUTOMATION_ACCOUNT}"
+            f"/runbooks/{runbook_name}/content?api-version=2024-10-23"
+        )
 
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/octet-stream"
-    }
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/octet-stream"
+        }
 
-    # Call the Azure REST API
-    response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers)
 
-    if response.status_code == 200:
-        runbook_content = response.content.decode("utf-8", errors="ignore")
-        print(f"[INFO] Successfully fetched content for '{runbook_name}'.")
-        return runbook_content
-    else:
-        print(f"[ERROR] Failed to fetch content for '{runbook_name}': "
-              f"{response.status_code} - {response.text}")
+        if response.status_code == 200:
+            content = response.content.decode("utf-8", errors="ignore")
+            logger.info("Fetched runbook content via REST API: '%s'", runbook_name)
+            return content
+
+        logger.error(
+            "Failed REST content fetch for '%s': %s - %s",
+            runbook_name,
+            response.status_code,
+            response.text
+        )
+        return None
+
+    except Exception as exc:
+        logger.exception("Exception while fetching runbook content via REST: %s", exc)
         return None
 
 
-# -----------------------------------------------------------------------------------------------
-# Function: create_new_runbook
-# -----------------------------------------------------------------------------------------------
+# ###############  FUNCTION: create_new_runbook ###############
 def create_new_runbook(runbook_name: str, system_name: str) -> None:
     """
-    Create a new Azure Automation runbook by duplicating the content of an existing one.
-
-    If the existing runbook content is unavailable (neither draft nor published),
-    a placeholder script is generated.
+    Creates a new Azure Automation runbook by duplicating content from an existing runbook.
+    If neither draft nor published content exists, an auto-generated placeholder script is used.
 
     Args:
-        runbook_name (str): Name of the source runbook.
-        system_name (str): Target system identifier to include in the new runbook name.
+        runbook_name (str): The existing runbook to copy.
+        system_name (str): System identifier appended to the new runbook name.
 
     Returns:
         None
     """
     credential = DefaultAzureCredential()
     client = AutomationClient(credential, config.SUBSCRIPTION_ID)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # Local folder to store generated runbook scripts
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs("generated_runbooks", exist_ok=True)
 
-    # Build unique name for the new runbook
     new_runbook_name = f"{runbook_name}_{system_name}_{timestamp}"
     file_name = f"{new_runbook_name}.ps1"
     file_path = os.path.join("generated_runbooks", file_name)
 
-    print(f"[INFO] Retrieving script content from existing runbook: '{runbook_name}'")
+    logger.info("Retrieving script content for source runbook: '%s'", runbook_name)
 
     source_script = None
 
-    # -------------------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     # Attempt 1: Retrieve draft version
-    # -------------------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     try:
         content_stream = client.runbook_draft.get_content(
             resource_group_name=config.RESOURCE_GROUP,
             automation_account_name=config.AUTOMATION_ACCOUNT,
             runbook_name=runbook_name
         )
+
         if hasattr(content_stream, "read"):
             source_script = content_stream.read().decode("utf-8")
         else:
             source_script = str(content_stream)
-        print(f"[INFO] Successfully retrieved draft content from '{runbook_name}'.")
-    except Exception as e:
-        print(f"[WARN] No draft version found or failed to read draft: {e}")
 
-    # -------------------------------------------------------------------------------------------
+        logger.info("Draft content retrieved successfully for '%s'", runbook_name)
+
+    except Exception as exc:
+        logger.warning("Draft version unavailable for '%s': %s", runbook_name, exc)
+
+    # --------------------------------------------------------------------------
     # Attempt 2: Retrieve published version
-    # -------------------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     if not source_script:
         try:
             content_stream = client.runbook.get_content(
@@ -129,19 +142,22 @@ def create_new_runbook(runbook_name: str, system_name: str) -> None:
                 automation_account_name=config.AUTOMATION_ACCOUNT,
                 runbook_name=runbook_name
             )
+
             if hasattr(content_stream, "read"):
                 source_script = content_stream.read().decode("utf-8")
             else:
                 source_script = str(content_stream)
-            print(f"[INFO] Successfully retrieved published content from '{runbook_name}'.")
-        except Exception as e:
-            print(f"[WARN] Could not fetch published content: {e}")
-            print("[INFO] Attempting REST API fallback method.")
+
+            logger.info("Published content retrieved successfully for '%s'", runbook_name)
+
+        except Exception as exc:
+            logger.warning("Published content unavailable for '%s': %s", runbook_name, exc)
+            logger.info("Attempting REST API fallback...")
             source_script = get_source_content(runbook_name)
 
-    # -------------------------------------------------------------------------------------------
-    # Fallback: Generate default script if no content was retrieved
-    # -------------------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # Fallback: Generate empty placeholder script
+    # --------------------------------------------------------------------------
     if not source_script:
         source_script = (
             f"# Auto-generated Runbook\n"
@@ -150,20 +166,21 @@ def create_new_runbook(runbook_name: str, system_name: str) -> None:
             f"# Created: {timestamp}\n\n"
             f"Write-Output 'Running {file_name}'\n"
         )
-        print("[INFO] Using auto-generated placeholder runbook content.")
+        logger.info("No source content found. Using placeholder script.")
 
-    # -------------------------------------------------------------------------------------------
-    # Write the runbook content to a local file
-    # -------------------------------------------------------------------------------------------
-    with open(file_path, "w", encoding="utf-8") as file:
-        file.write(source_script)
-    print(f"[INFO] Runbook file created locally: {file_path}")
+    # --------------------------------------------------------------------------
+    # Write script content locally
+    # --------------------------------------------------------------------------
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(source_script)
 
-    # -------------------------------------------------------------------------------------------
+    logger.info("Runbook script saved locally at: %s", file_path)
+
+    # --------------------------------------------------------------------------
     # Step 1: Create a new runbook in Azure Automation
-    # -------------------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
     try:
-        runbook = client.runbook.create_or_update(
+        created_runbook = client.runbook.create_or_update(
             resource_group_name=config.RESOURCE_GROUP,
             automation_account_name=config.AUTOMATION_ACCOUNT,
             runbook_name=new_runbook_name,
@@ -177,14 +194,16 @@ def create_new_runbook(runbook_name: str, system_name: str) -> None:
                 },
             },
         )
-        print(f"[INFO] Runbook created in Azure Automation: '{runbook.name}'")
-    except Exception as e:
-        print(f"[ERROR] Failed to create runbook in Azure Automation: {e}")
+
+        logger.info("Runbook created in Azure Automation: %s", created_runbook.name)
+
+    except Exception as exc:
+        logger.error("Failed to create new runbook '%s': %s", new_runbook_name, exc)
         return
 
-    # -------------------------------------------------------------------------------------------
-    # Step 2: Upload content to the newly created runbook
-    # -------------------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # Step 2: Upload draft content
+    # --------------------------------------------------------------------------
     try:
         poller = client.runbook_draft.begin_replace_content(
             resource_group_name=config.RESOURCE_GROUP,
@@ -193,19 +212,23 @@ def create_new_runbook(runbook_name: str, system_name: str) -> None:
             runbook_content=source_script
         )
         poller.result()
-        print(f"[INFO] Runbook content uploaded successfully: '{file_name}'")
-    except Exception as e:
-        print(f"[ERROR] Failed to upload runbook content: {e}")
 
-    # -------------------------------------------------------------------------------------------
-    # Step 3: Publish the runbook
-    # -------------------------------------------------------------------------------------------
+        logger.info("Runbook content uploaded successfully: %s", file_name)
+
+    except Exception as exc:
+        logger.error("Failed to upload content for runbook '%s': %s", new_runbook_name, exc)
+
+    # --------------------------------------------------------------------------
+    # Step 3: Publish runbook
+    # --------------------------------------------------------------------------
     try:
         client.runbook.begin_publish(
             resource_group_name=config.RESOURCE_GROUP,
             automation_account_name=config.AUTOMATION_ACCOUNT,
             runbook_name=new_runbook_name
         ).result()
-        print(f"[INFO] Runbook published successfully: '{file_name}'")
-    except Exception as e:
-        print(f"[ERROR] Failed to publish runbook: {e}")
+
+        logger.info("Runbook published successfully: %s", file_name)
+
+    except Exception as exc:
+        logger.error("Failed to publish runbook '%s': %s", new_runbook_name, exc)

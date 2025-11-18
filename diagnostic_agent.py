@@ -3,130 +3,136 @@
 ## Business Owner : Data and AIA
 ## Author/Team    : POC Team
 ## Date           : 29th Oct 2025
-## Purpose        : 
-##   This script defines the Diagnostic Agent that takes a user-provided issue summary as input,
-##   processes it through Azure AI Agent APIs, and returns the name of the runbook that can be 
-##   executed on the user’s machine.
+## Purpose        :
+##   Diagnostic Agent module for processing user-provided issue summaries through Azure AI Agent
+##   services and extracting the name of the relevant automation runbook.
 ##
 ##   Key Functionalities:
-##     - Connects to Azure Automation and AI Agent services.
-##     - Sends issue text to a diagnostic AI agent.
+##     - Connects to Azure Automation & Azure AI Agent services.
+##     - Sends issue text to a Diagnostic AI Agent.
 ##     - Retrieves and returns the corresponding runbook name.
+##
+## Notes:
+##   - This file follows DSET-standardized structure, comments, naming, and logging.
+##   - No additional integrations added as per request.
 #################################################################################################
 
-# -----------------------------------------------------------------------------------------------
-# Library Imports
-# -----------------------------------------------------------------------------------------------
+
+# ###############  IMPORT PACKAGES  ###############
+import logging
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential, AzureCliCredential
 from azure.ai.agents.models import ListSortOrder
 from azure.mgmt.automation import AutomationClient
+
 import config
 from utils import create_new_runbook
 
-# -----------------------------------------------------------------------------------------------
-# Configuration Constants
-# -----------------------------------------------------------------------------------------------
+
+# ###############  CONFIGURATION CONSTANTS  ###############
 SUBSCRIPTION_ID = config.SUBSCRIPTION_ID
 RESOURCE_GROUP = config.RESOURCE_GROUP
 AUTOMATION_ACCOUNT = config.AUTOMATION_ACCOUNT
 LOCATION = config.LOCATION
 
-# Default values for runbook
+# Default values for runbook creation
 SCRIPT_TEXT = "test"
 RUNBOOK_TYPE = "PowerShell"
 
-# -----------------------------------------------------------------------------------------------
-# Azure Authentication and Client Initialization
-# -----------------------------------------------------------------------------------------------
-# Default credential chain (Managed Identity, CLI, Environment, etc.)
+
+# ###############  LOGGING CONFIGURATION  ###############
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
+)
+logger = logging.getLogger("diagnostic_agent")
+
+
+# ###############  AZURE CLIENT INITIALIZATION  ###############
+# Authenticate using DefaultAzureCredential (Supports MI, CLI, Env)
 default_credential = DefaultAzureCredential()
 
-# Automation client for managing Azure Automation Runbooks
+# Azure Automation client
 automation_client = AutomationClient(default_credential, SUBSCRIPTION_ID)
 
-# AI Project client (uses Azure CLI authentication)
+# Azure AI Project client (CLI credential)
 ai_project_client = AIProjectClient(
     credential=AzureCliCredential(),
     endpoint=config.MODEL_ENDPOINT
 )
 
-# Retrieve the configured diagnostic agent
+# Fetch Diagnostic AI Agent instance
 diagnostic_agent = ai_project_client.agents.get_agent(config.DIAGNOSTIC_AGENT_ID)
 
-# -----------------------------------------------------------------------------------------------
-# Function: process_issue
-# -----------------------------------------------------------------------------------------------
+
+# ###############  FUNCTION: process_issue  ###############
 def process_issue(issue: str) -> str | None:
     """
-    Process a user-reported issue using the Azure AI Diagnostic Agent.
+    Sends an issue description to the Azure Diagnostic AI Agent and extracts the
+    recommended runbook name from the response messages.
 
     Args:
-        issue (str): Description or summary of the issue provided by the user.
+        issue (str):
+            The text describing the user's problem or issue.
 
     Returns:
-        str | None: The name of the runbook identified by the diagnostic agent,
-                    or None if no runbook name was found.
+        str | None:
+            The name of the runbook returned by the Diagnostic AI Agent,
+            or None if no runbook was found or processing failed.
 
     Flow:
-        1. Create a new thread in the AI agent.
-        2. Send the issue text as a user message.
-        3. Run the agent to process the thread.
-        4. Retrieve and parse messages to extract the runbook name.
+        1. Create a new AI agent thread.
+        2. Add the issue text as a message.
+        3. Run the agent on the thread.
+        4. Retrieve and parse the resulting messages.
     """
     try:
-        # ---------------------------------------------------------------------------------------
-        # Step 1: Create a new thread for this issue
-        # ---------------------------------------------------------------------------------------
-        thread = ai_project_client.agents.threads.create()
+        logger.info("Processing diagnostic issue: %s", issue)
 
-        # ---------------------------------------------------------------------------------------
-        # Step 2: Post the issue message to the thread
-        # ---------------------------------------------------------------------------------------
+        # Step 1: Create a new thread
+        thread = ai_project_client.agents.threads.create()
+        logger.debug("Created new diagnostic thread: %s", thread.id)
+
+        # Step 2: Send user message to the thread
         ai_project_client.agents.messages.create(
             thread_id=thread.id,
             role="user",
             content=issue
         )
+        logger.debug("Posted issue message to diagnostic thread")
 
-        # ---------------------------------------------------------------------------------------
-        # Step 3: Execute the diagnostic agent to process the thread
-        # ---------------------------------------------------------------------------------------
+        # Step 3: Run the diagnostic agent
         run = ai_project_client.agents.runs.create_and_process(
             thread_id=thread.id,
             agent_id=diagnostic_agent.id
         )
 
-        # ---------------------------------------------------------------------------------------
-        # Step 4: Handle failure cases
-        # ---------------------------------------------------------------------------------------
+        # Step 4: Handle run failure
         if run.status == "failed":
-            print(f"[ERROR] Diagnostic run failed: {run.last_error}")
+            logger.error("Diagnostic AI agent run failed: %s", run.last_error)
             return None
 
-        # ---------------------------------------------------------------------------------------
-        # Step 5: Retrieve messages and extract the runbook name
-        # ---------------------------------------------------------------------------------------
+        # Step 5: Retrieve messages to extract runbook name
         messages = ai_project_client.agents.messages.list(
             thread_id=thread.id,
             order=ListSortOrder.ASCENDING
         )
 
-        runbook_name = None
+        runbook_name: str | None = None
+
         for message in messages:
             if message.text_messages:
-                # Assuming the last text message contains the runbook name
+                # Assume the final text message contains the runbook name
                 runbook_name = message.text_messages[-1].text.value
 
-        # ---------------------------------------------------------------------------------------
-        # Step 6: Return runbook name (if found)
-        # ---------------------------------------------------------------------------------------
+        # Step 6: Return runbook name if found
         if runbook_name:
+            logger.info("Diagnostic agent returned runbook: %s", runbook_name)
             return runbook_name
-        else:
-            print("[INFO] No runbook name found from diagnostic agent.")
-            return None
 
-    except Exception as e:
-        print(f"[EXCEPTION] Failed to process issue: {e}")
+        logger.info("No runbook name found in diagnostic agent response.")
+        return None
+
+    except Exception as exc:
+        logger.exception("Exception occurred while processing diagnostic issue: %s", exc)
         return None

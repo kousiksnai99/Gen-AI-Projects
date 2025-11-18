@@ -1,42 +1,65 @@
 #################################################################################################
-## File: main.py
-## Purpose: Expose REST APIs for Diagnostic and Troubleshooting Agents
-## Author: <Your Name>
-## Description:
-##   This FastAPI service provides two main endpoints:
-##     - /diagnostic/chat : Handles diagnostic issue analysis and optional runbook execution.
-##     - /troubleshooting/chat : Handles troubleshooting issue resolution with a confirmation flow.
-##   It also maintains a short-lived in-memory store for pending user confirmations.
+## Project name : Diagnostic & Troubleshooting Agent API
+## Business owner / Team : <Fill in>
+## Author / Team : <Your Name> / <Team Name>
+## Date : 2025-11-18
+## Purpose :
+##   FastAPI service exposing REST APIs for Diagnostic and Troubleshooting Agents.
+##   - /diagnostic/chat     : Diagnostic agent analysis and optional runbook execution.
+##   - /troubleshooting/chat : Troubleshooting agent suggestion + confirmation flow.
+##
+## Notes:
+##   - This file follows the project's coding standards: clear sectioning, single import block,
+##     documented functions, logging (no print), meaningful variable names, and in-file README.
+##   - Do NOT integrate external resources here (Azure DevOps, KeyVault, CI/CD) — per request.
 #################################################################################################
 
+# ###############  IMPORT PACKAGES  ###############
+from datetime import datetime, timedelta
+import threading
+import logging
+from typing import Dict, Any, Optional, Tuple
+
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+# local module imports (assumed present and unchanged)
 from diagnostic_agent import process_issue as diagnostic_process_issue
 from troubleshooting_agent import process_issue as troubleshooting_process_issue
 from utils import create_new_runbook
+
 import uvicorn
-from datetime import datetime, timedelta
-import threading
 
-# -----------------------------------------------------------------------------------------------
-# FastAPI App Initialization
-# -----------------------------------------------------------------------------------------------
-app = FastAPI(title="Diagnostic & Troubleshooting Agent API")
+# ###############  CONFIGURATION / CONSTANTS  ###############
+APP_TITLE = "Diagnostic & Troubleshooting Agent API"
+PENDING_TTL_SECONDS: int = 300  # TTL for pending confirmations (seconds)
 
-# -----------------------------------------------------------------------------------------------
-# Request Model Definition
-# -----------------------------------------------------------------------------------------------
+# ###############  LOGGING SETUP  ###############
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s"
+)
+logger = logging.getLogger("diagnostic_troubleshooting_api")
+
+# ###############  FASTAPI APP INITIALIZATION  ###############
+app = FastAPI(title=APP_TITLE)
+
+
+# ###############  REQUEST / RESPONSE MODELS  ###############
 class IssueRequest(BaseModel):
     """
-    Request model for diagnostic/troubleshooting chat endpoints.
+    Request model for diagnostic and troubleshooting endpoints.
+    Fields:
+      - issue: user-described issue or response (e.g. "Disk error", "yes")
+      - execute: whether to execute the suggested runbook automatically or store for confirmation
+      - target_machine: machine/system name the runbook will be executed against
     """
-    issue: str                               # User-described issue or response (e.g., "Disk error", "yes")
-    execute: bool = False                    # Whether to execute the generated runbook automatically
-    target_machine: str = "demo_system"      # Target system or machine name
+    issue: str = Field(..., description="User-described issue or reply (e.g., 'Disk error' or 'yes')")
+    execute: bool = Field(False, description="Execute runbook immediately (or store for confirm when True)")
+    target_machine: str = Field("demo_system", description="Target system or machine name")
 
 
-# -----------------------------------------------------------------------------------------------
-# Global State: Pending Confirmations (In-memory store)
+# ###############  GLOBAL STATE: PENDING CONFIRMATIONS (IN-MEMORY)  ###############
 # Structure:
 #   {
 #       "machine_name": {
@@ -45,125 +68,128 @@ class IssueRequest(BaseModel):
 #           "expires_at": datetime
 #       }
 #   }
-# -----------------------------------------------------------------------------------------------
-PENDING_CONFIRMATIONS = {}
+PENDING_CONFIRMATIONS: Dict[str, Dict[str, Any]] = {}
 PENDING_LOCK = threading.Lock()
-PENDING_TTL_SECONDS = 300  # Time-to-live for pending confirmations (in seconds)
 
 
-# -----------------------------------------------------------------------------------------------
-# Utility Function: Cleanup Expired Confirmations
-# -----------------------------------------------------------------------------------------------
-def cleanup_expired_pending():
+# ###############  UTILITY FUNCTIONS  ###############
+def cleanup_expired_pending() -> None:
     """
     Remove expired pending confirmations from the in-memory store.
-    This function is called periodically before processing new troubleshooting requests.
+    Called before processing troubleshooting requests to ensure stale entries are removed.
     """
     with PENDING_LOCK:
         now = datetime.utcnow()
         expired_keys = [
-            key for key, data in PENDING_CONFIRMATIONS.items()
-            if data["expires_at"] <= now
+            machine for machine, data in PENDING_CONFIRMATIONS.items()
+            if data.get("expires_at") and data["expires_at"] <= now
         ]
-        for key in expired_keys:
-            del PENDING_CONFIRMATIONS[key]
+        for machine in expired_keys:
+            logger.info("Cleaning up expired pending confirmation for machine: %s", machine)
+            del PENDING_CONFIRMATIONS[machine]
 
 
-# -----------------------------------------------------------------------------------------------
-# Endpoint: Diagnostic Agent Chat
-# -----------------------------------------------------------------------------------------------
+# ###############  ENDPOINTS  ###############
 @app.post("/diagnostic/chat")
 def chat_with_diagnostic_agent(req: IssueRequest):
     """
-    Endpoint for interacting with the Diagnostic Agent.
+    Endpoint to interact with Diagnostic Agent.
 
     Flow:
-      1. Calls diagnostic agent to analyze the issue and get a runbook name.
-      2. If 'execute=True', executes the runbook immediately on the target machine.
-      3. Returns the runbook name and status message.
+      1. Call diagnostic agent to analyze the issue and return a runbook name.
+      2. If req.execute is True -> call create_new_runbook(...) to execute immediately.
+      3. Return runbook name and a status message.
     """
     try:
-        # Process the issue using the diagnostic agent
-        runbook_name = diagnostic_process_issue(req.issue)
+        logger.info("Received diagnostic request for machine=%s execute=%s", req.target_machine, req.execute)
+
+        runbook_name: Optional[str] = diagnostic_process_issue(req.issue)
 
         if not runbook_name:
-            raise HTTPException(
-                status_code=404,
-                detail="No runbook name found from diagnostic agent."
-            )
+            logger.warning("Diagnostic agent returned no runbook for issue: %s", req.issue)
+            raise HTTPException(status_code=404, detail="No runbook name found from diagnostic agent.")
 
-        # Execute runbook immediately if requested
         if req.execute:
+            # Execute runbook immediately
+            logger.info("Executing runbook '%s' on machine '%s'", runbook_name, req.target_machine)
             create_new_runbook(runbook_name, req.target_machine)
             return {
                 "runbook_name": runbook_name,
                 "message": f"Runbook '{runbook_name}' executed on {req.target_machine}"
             }
 
-        # Otherwise, return runbook information only
+        logger.info("Runbook '%s' ready (not executed) for machine '%s'", runbook_name, req.target_machine)
         return {
             "runbook_name": runbook_name,
             "message": "Runbook ready but not executed."
         }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        # Re-raise HTTPExceptions to let FastAPI return them as-is
+        raise
+    except Exception as exc:  # broad exception only to convert to HTTP 500 with logging
+        logger.exception("Unhandled exception in /diagnostic/chat: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# -----------------------------------------------------------------------------------------------
-# Endpoint: Troubleshooting Agent Chat (Two-step confirmation flow)
-# -----------------------------------------------------------------------------------------------
 @app.post("/troubleshooting/chat")
 def chat_with_troubleshooting_agent(req: IssueRequest):
     """
-    Endpoint for interacting with the Troubleshooting Agent.
+    Endpoint to interact with Troubleshooting Agent - two-step confirmation flow.
 
     Flow:
-      - Step 1: User describes an issue → agent suggests a runbook and asks for confirmation.
-      - Step 2: User replies with 'yes'/'y' → stored runbook gets executed on the target machine.
+      Step 1: User describes issue -> agent suggests runbook and (if execute=True) store pending confirmation.
+      Step 2: User replies 'yes'/'y' -> execute pending runbook for the given target_machine.
 
-    If execute=True during Step 1, the pending runbook suggestion is stored
-    for confirmation for up to PENDING_TTL_SECONDS (default: 5 minutes).
+    Note:
+      - Pending confirmations are kept in-memory for a limited TTL (PENDING_TTL_SECONDS).
+      - This function runs a cleanup for expired pendings at the start of each call.
     """
     try:
-        # Clean up any expired pending confirmations before processing
+        logger.info("Received troubleshooting request for machine=%s execute=%s issue=%s",
+                    req.target_machine, req.execute, req.issue)
+
+        # Clean up expired pending confirmations first
         cleanup_expired_pending()
 
         user_input = (req.issue or "").strip().lower()
 
-        # ---------------------------------------------------------------------------------------
-        # Step 2: User confirms ("yes"/"y") → execute pending runbook
-        # ---------------------------------------------------------------------------------------
+        # ---------------------------------------------
+        # Step 2: Confirmation ("yes" or "y") -> execute stored runbook
+        # ---------------------------------------------
         if user_input in ("yes", "y"):
+            logger.info("User confirmed execution on machine '%s'", req.target_machine)
             with PENDING_LOCK:
                 pending = PENDING_CONFIRMATIONS.get(req.target_machine)
 
                 if not pending:
+                    logger.warning("No pending runbook found for machine '%s' on confirmation", req.target_machine)
                     raise HTTPException(
                         status_code=404,
                         detail="No pending runbook confirmation found for this target machine."
                     )
 
-                runbook_name = pending["runbook_name"]
+                runbook_name = pending.get("runbook_name")
                 # Remove pending to prevent duplicate execution
                 del PENDING_CONFIRMATIONS[req.target_machine]
 
             # Execute the confirmed runbook
+            logger.info("Executing confirmed runbook '%s' on machine '%s'", runbook_name, req.target_machine)
             create_new_runbook(runbook_name, req.target_machine)
             return {"message": f"Runbook '{runbook_name}' executed on {req.target_machine}"}
 
-        # ---------------------------------------------------------------------------------------
-        # Step 1: Initial issue description → agent suggests runbook
-        # ---------------------------------------------------------------------------------------
-        runbook_name, full_description = troubleshooting_process_issue(req.issue)
+        # ---------------------------------------------
+        # Step 1: Initial issue description -> agent suggests runbook
+        # ---------------------------------------------
+        runbook_result: Tuple[Optional[str], Optional[str]] = troubleshooting_process_issue(req.issue)
+        # Expect troubleshooting_process_issue to return (runbook_name, full_description)
+        runbook_name, full_description = runbook_result if isinstance(runbook_result, tuple) else (None, None)
 
         if not runbook_name:
-            raise HTTPException(
-                status_code=404,
-                detail="No runbook name found from troubleshooting agent."
-            )
+            logger.warning("Troubleshooting agent returned no runbook for issue: %s", req.issue)
+            raise HTTPException(status_code=404, detail="No runbook name found from troubleshooting agent.")
 
-        # Store pending confirmation if execution is expected later
+        # Store pending confirmation if user requested execution later (req.execute True)
         if req.execute:
             with PENDING_LOCK:
                 PENDING_CONFIRMATIONS[req.target_machine] = {
@@ -171,8 +197,9 @@ def chat_with_troubleshooting_agent(req: IssueRequest):
                     "full_text": full_description,
                     "expires_at": datetime.utcnow() + timedelta(seconds=PENDING_TTL_SECONDS)
                 }
+                logger.info("Stored pending runbook '%s' for machine '%s' (ttl=%s seconds)",
+                            runbook_name, req.target_machine, PENDING_TTL_SECONDS)
 
-        # Prepare next-step confirmation prompt
         next_step_prompt = (
             f"Do you want me to fix this issue automatically by running runbook '{runbook_name}' (yes/no)?"
         )
@@ -184,23 +211,21 @@ def chat_with_troubleshooting_agent(req: IssueRequest):
 
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        logger.exception("Unhandled exception in /troubleshooting/chat: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# -----------------------------------------------------------------------------------------------
-# Endpoint: Health Check
-# -----------------------------------------------------------------------------------------------
 @app.get("/health")
 def health_check():
     """
-    Simple API health check endpoint.
+    Simple health check endpoint.
     """
     return {"status": "ok", "message": "API is running"}
 
 
-# -----------------------------------------------------------------------------------------------
-# Application Entry Point
-# -----------------------------------------------------------------------------------------------
+# ###############  APPLICATION ENTRY POINT  ###############
 if __name__ == "__main__":
+    # Running with reload=True is convenient for development only.
+    # In production run via an ASGI server/process manager (gunicorn, uvicorn workers, etc.)
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

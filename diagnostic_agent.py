@@ -133,6 +133,30 @@ def process_issue(issue: str) -> str | None:
         logger.info("No runbook name found in diagnostic agent response.")
         return None
 
+
+    "Time_Logger": {
+        "JSON_Parser_Start": "2025-11-19T05:40:05.628385Z",
+        "JSON_Parser_End": "2025-11-19T05:40:05.628415Z",
+        "Schema_Validation_Start": "2025-11-19T05:40:05.628418Z",
+        "Schema_Validation_End": "2025-11-19T05:40:05.628426Z",
+        "Config_Start": "2025-11-19T05:40:05.628428Z",
+        "Config_End": "2025-11-19T05:40:05.628534Z",
+        "Cred_Start": "2025-11-19T05:40:05.628538Z",
+        "Cred_End": "2025-11-19T05:40:05.638694Z",
+        "Automation_Start": "2025-11-19T05:40:05.638705Z",
+        "Automation_End": "2025-11-19T05:40:05.639080Z",
+        "Foundry_Start": "2025-11-19T05:40:05.639087Z",
+        "Foundry_End": "2025-11-19T05:40:05.639214Z",
+        "Event_Logger_Start": "2025-11-19T05:40:05.639219Z",
+        "Event_Logger_End": "2025-11-19T05:40:05.639327Z",
+        "Runbook_Resolution_Start": "2025-11-19T05:40:05.639331Z",
+        "Runbook_Resolution_End": "2025-11-19T05:40:12.748618Z",
+        "Cloning_Start": "2025-11-19T05:40:12.748631Z",
+        "Cloning_End": "2025-11-19T05:40:15.923050Z"
+    }
+}
+
     except Exception as exc:
         logger.exception("Exception occurred while processing diagnostic issue: %s", exc)
         return None
+

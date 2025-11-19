@@ -232,3 +232,50 @@ def create_new_runbook(runbook_name: str, system_name: str) -> None:
 
     except Exception as exc:
         logger.error("Failed to publish runbook '%s': %s", new_runbook_name, exc)
+
+esponse headers:
+    'Cache-Control': 'no-cache'
+    'Pragma': 'no-cache'
+    'Expires': '-1'
+    'Location': 'REDACTED'
+    'Retry-After': '5'
+    'ocp-automation-operationresultid': 'REDACTED'
+    'x-ms-request-id': 'e18bae59-c518-11f0-810c-005056987952'
+    'x-ms-operation-identifier': 'REDACTED'
+    'x-ms-ratelimit-remaining-subscription-writes': '199'
+    'x-ms-ratelimit-remaining-subscription-global-writes': 'REDACTED'
+    'x-ms-correlation-request-id': 'REDACTED'
+    'x-ms-routing-request-id': 'REDACTED'
+    'Strict-Transport-Security': 'REDACTED'
+    'X-Content-Type-Options': 'REDACTED'
+    'X-Cache': 'REDACTED'
+    'X-MSEdge-Ref': 'Ref A: EC5D5FEE65C14D4B87F428BD4EC9C632 Ref B: TLV231050411060 Ref C: 2025-11-19T07:25:10Z'
+    'Date': 'Wed, 19 Nov 2025 07:25:09 GMT'
+    'Content-Length': '0'
+2025-11-19 09:25:10,703 [INFO] azure.core.pipeline.policies.http_logging_policy - Request URL: 'https://management.azure.com/subscriptions/4c85c528-9da9-48ac-a5c3-41bd351728eb/resourceGroups/rg-fbntf-ais-swce-poc/providers/Microsoft.Automation/automationAccounts/aa-mbfin-ais-swce-poc/runbooks/Diagnose_KB0016605_demo_syetem_20251119_092500/operationResults/8bab068e-182e-47de-b349-a2a7026a070b?api-version=REDACTED&t=REDACTED&c=REDACTED&s=REDACTED&h=REDACTED'
+Request method: 'GET'
+Request headers:
+    'x-ms-client-request-id': 'e18bae59-c518-11f0-810c-005056987952'
+    'User-Agent': 'azsdk-python-mgmt-automation/1.0.0 Python/3.13.6 (Windows-2022Server-10.0.20348-SP0)'
+    'Authorization': 'REDACTED'
+No body was attached to the request
+2025-11-19 09:25:11,052 [INFO] azure.core.pipeline.policies.http_logging_policy - Response status: 200
+Response headers:
+    'Cache-Control': 'no-cache'
+    'Pragma': 'no-cache'
+    'Content-Type': 'text/plain; charset=utf-8'
+    'Expires': '-1'
+    'x-ms-request-id': 'e18bae59-c518-11f0-810c-005056987952'
+    'x-ms-operation-identifier': 'REDACTED'
+    'x-ms-ratelimit-remaining-subscription-reads': '248'
+    'x-ms-ratelimit-remaining-subscription-global-reads': 'REDACTED'
+    'x-ms-correlation-request-id': 'REDACTED'
+    'x-ms-routing-request-id': 'REDACTED'
+    'Strict-Transport-Security': 'REDACTED'
+    'X-Content-Type-Options': 'REDACTED'
+    'X-Cache': 'REDACTED'
+    'X-MSEdge-Ref': 'Ref A: 58AB66CD92674BD2906907AB1CE38224 Ref B: TLV231050411060 Ref C: 2025-11-19T07:25:10Z'
+    'Date': 'Wed, 19 Nov 2025 07:25:10 GMT'
+    'Content-Length': '0'
+2025-11-19 09:25:11,053 [INFO] automation_helpers - Runbook published successfully: Diagnose_KB0016605_demo_syetem_20251119_092500.ps1
+INFO:     127.0.0.1:58817 - "POST /diagnostic/chat HTTP/1.1" 200 OK

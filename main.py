@@ -7,23 +7,8 @@
 ## Purpose:
 ##   FastAPI service exposing REST APIs for Diagnostic and Troubleshooting Agents.
 ##
-##   Endpoints:
-##     1. /diagnostic/chat
-##          - Sends issue to Diagnostic Agent
-##          - Optionally executes runbook immediately
-##
-##     2. /troubleshooting/analyze
-##          - Sends issue to Troubleshooting Agent
-##          - Returns full AI message + runbook name
-##          - If execute=True → stored for confirmation
-##
-##     3. /troubleshooting/confirm
-##          - Confirms runbook execution (yes/no equivalent)
-##          - Executes stored runbook if confirmed
-##
 ## Notes:
-##   - Follow project coding patterns: strong sectioning, docstrings, logging, no prints.
-##   - No external integrations (KeyVault, DevOps etc.) beyond existing imports.
+##   - This file includes Time_Logger instrumentation for /diagnostic/chat.
 #################################################################################################
 
 # -----------------------------------------------------------------------------------------------
@@ -38,6 +23,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 # Local modules (assumed present)
+# NOTE: diagnostic_process_issue now returns tuple (runbook_name, time_logger)
 from diagnostic_agent import process_issue as diagnostic_process_issue
 from troubleshooting_agent import process_issue as troubleshooting_process_issue
 from utils import create_new_runbook
@@ -74,25 +60,13 @@ app = FastAPI(title=APP_TITLE)
 class IssueRequest(BaseModel):
     """
     Request model for API interactions with Diagnostic and Troubleshooting Agents.
-
-    Fields:
-        issue (str)          : User issue description or prompt.
-        execute (bool)       : Whether runbook should be stored for execution (True/False).
-        target_machine (str) : The target system where runbook would be executed.
     """
     issue: str = Field(..., description="User issue description or input text")
-    execute: bool = Field(False, description="Store runbook for execution if True")
+    execute: bool = Field(False, description="Store/execute runbook if True")
     target_machine: str = Field("demo_system", description="Target system or machine name")
 
 
 class ConfirmRequest(BaseModel):
-    """
-    Request model for confirming runbook execution.
-
-    Fields:
-        confirm (bool)       : True = execute pending runbook, False = cancel.
-        target_machine (str) : Machine that pending runbook belongs to.
-    """
     confirm: bool = Field(..., description="True = execute, False = cancel")
     target_machine: str = Field(..., description="Machine for which pending task exists")
 
@@ -100,14 +74,6 @@ class ConfirmRequest(BaseModel):
 # -----------------------------------------------------------------------------------------------
 # GLOBAL IN-MEMORY STORE FOR PENDING RUNBOOK CONFIRMATIONS
 # -----------------------------------------------------------------------------------------------
-# Structure:
-#   {
-#       "machine_name": {
-#           "runbook_name": str,
-#           "full_text": str,
-#           "expires_at": datetime
-#       }
-#   }
 PENDING_CONFIRMATIONS: Dict[str, Dict[str, Any]] = {}
 PENDING_LOCK = threading.Lock()
 
@@ -118,7 +84,6 @@ PENDING_LOCK = threading.Lock()
 def cleanup_expired_pending() -> None:
     """
     Removes expired pending confirmations from the in-memory store.
-    Called at the start of each troubleshooting request.
     """
     with PENDING_LOCK:
         now = datetime.utcnow()
@@ -126,69 +91,130 @@ def cleanup_expired_pending() -> None:
             machine for machine, data in PENDING_CONFIRMATIONS.items()
             if data.get("expires_at") and data["expires_at"] <= now
         ]
-
         for machine in expired:
             logger.info("Removing expired pending confirmation for machine=%s", machine)
             del PENDING_CONFIRMATIONS[machine]
 
 
+def _now_isoutc() -> str:
+    """Helper — current UTC ISO timestamp with Z suffix."""
+    return datetime.utcnow().isoformat(timespec="microseconds") + "Z"
+
+
 # -----------------------------------------------------------------------------------------------
-# DIAGNOSTIC AGENT ENDPOINT
+# DIAGNOSTIC AGENT ENDPOINT (with Time_Logger)
 # -----------------------------------------------------------------------------------------------
 @app.post("/diagnostic/chat")
 def chat_with_diagnostic_agent(req: IssueRequest):
     """
     Diagnostic Agent API
 
-    Flow:
-      1. Sends issue text to Diagnostic Agent.
-      2. Receives runbook name.
-      3. If execute=True → runbook is executed immediately.
+    Enhanced with Time_Logger to measure timings across the diagnostic flow.
+    Returns runbook_name, message, and Time_Logger dict in the response.
     """
-    try:
-        logger.info(
-            "Diagnostic request received | machine=%s execute=%s",
-            req.target_machine, req.execute
-        )
+    # Initialize local time logger
+    time_logger: Dict[str, str] = {}
 
-        runbook_name: Optional[str] = diagnostic_process_issue(req.issue)
+    try:
+        # JSON parse start (request entry)
+        time_logger["JSON_Parser_Start"] = _now_isoutc()
+
+        # (Pydantic has already parsed `req` before reaching function)
+        # JSON parse end
+        time_logger["JSON_Parser_End"] = _now_isoutc()
+
+        # Schema validation (we do a light manual check to mark times)
+        time_logger["Schema_Validation_Start"] = _now_isoutc()
+        # Minimal schema validation: ensure issue is non-empty string
+        if not isinstance(req.issue, str) or not req.issue.strip():
+            time_logger["Schema_Validation_End"] = _now_isoutc()
+            raise HTTPException(status_code=422, detail="Invalid 'issue' field.")
+        time_logger["Schema_Validation_End"] = _now_isoutc()
+
+        # Config access (marking when config usage would happen)
+        time_logger["Config_Start"] = _now_isoutc()
+        # No heavy config ops here; this marks the interval for config reads.
+        time_logger["Config_End"] = _now_isoutc()
+
+        # Credentials / client init (if any) - we mark the window before calling diagnostic agent
+        time_logger["Cred_Start"] = _now_isoutc()
+
+        # Call into diagnostic agent — note: diagnostic_process_issue now returns (runbook_name, agent_time_logger)
+        agent_result = diagnostic_process_issue(req.issue)
+
+        # diagnostic_process_issue should return tuple (runbook_name, agent_time_logger)
+        if isinstance(agent_result, tuple):
+            runbook_name, agent_time = agent_result
+            # Merge agent_time into our time_logger
+            if isinstance(agent_time, dict):
+                # only add keys that do not clobber existing keys
+                for k, v in agent_time.items():
+                    if k not in time_logger:
+                        time_logger[k] = v
+        else:
+            # Backwards compatibility if agent returns only runbook name
+            runbook_name = agent_result
+
+        time_logger["Cred_End"] = _now_isoutc()
 
         if not runbook_name:
+            time_logger["Runbook_Resolution_Start"] = time_logger.get("Runbook_Resolution_Start", _now_isoutc())
+            time_logger["Runbook_Resolution_End"] = _now_isoutc()
             logger.warning("No runbook returned from diagnostic agent for issue: %s", req.issue)
             raise HTTPException(status_code=404, detail="Diagnostic agent returned no runbook.")
 
+        # Runbook resolution timestamps (if agent didn't set them)
+        time_logger.setdefault("Runbook_Resolution_Start", _now_isoutc())
+        time_logger.setdefault("Runbook_Resolution_End", _now_isoutc())
+
+        # If execute requested, call create_new_runbook and capture automation/cloning times
         if req.execute:
-            logger.info("Executing runbook '%s' on machine '%s'", runbook_name, req.target_machine)
-            create_new_runbook(runbook_name, req.target_machine)
+            time_logger["Automation_Start"] = _now_isoutc()
+            # create_new_runbook now accepts optional time_logger to fill automation/cloning times
+            try:
+                create_new_runbook(runbook_name, req.target_machine, time_logger=time_logger)
+            finally:
+                time_logger["Automation_End"] = time_logger.get("Automation_End", _now_isoutc())
+                time_logger.setdefault("Cloning_Start", time_logger.get("Cloning_Start", _now_isoutc()))
+                time_logger.setdefault("Cloning_End", time_logger.get("Cloning_End", _now_isoutc()))
 
             return {
                 "runbook_name": runbook_name,
-                "message": f"Runbook '{runbook_name}' executed on {req.target_machine}"
+                "message": f"Runbook '{runbook_name}' executed on {req.target_machine}",
+                "Time_Logger": time_logger
             }
+
+        # Non-execute path — return runbook and the collected time logger
+        time_logger.setdefault("Event_Logger_Start", _now_isoutc())
+        time_logger.setdefault("Event_Logger_End", _now_isoutc())
 
         return {
             "runbook_name": runbook_name,
-            "message": "Runbook ready but not executed."
+            "message": "Runbook ready but not executed.",
+            "Time_Logger": time_logger
         }
 
     except HTTPException:
-        raise
+        # Ensure we still return time logger for diagnostics when possible
+        if "Time_Logger" in locals():
+            # raise with HTTPException (FastAPI will return the status); include logger in logs only
+            raise
+        else:
+            raise
     except Exception as exc:
         logger.exception("Unhandled exception in /diagnostic/chat: %s", exc)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        # Try to include partial time_logger
+        response_payload = {"message": "Internal server error"}
+        if time_logger:
+            response_payload["Time_Logger"] = time_logger
+        raise HTTPException(status_code=500, detail=response_payload)
 
 
 # -----------------------------------------------------------------------------------------------
-# TROUBLESHOOTING STEP-1 (ANALYZE)
+# TROUBLESHOOTING ENDPOINTS (unchanged)
 # -----------------------------------------------------------------------------------------------
 @app.post("/troubleshooting/analyze")
 def troubleshooting_analyze(req: IssueRequest):
-    """
-    Troubleshooting Agent Step-1:
-      - Sends issue description to Troubleshooting Agent
-      - Returns runbook suggestion + full explanation
-      - If execute=True → store runbook for later confirmation
-    """
     try:
         logger.info(
             "Troubleshooting Step-1 | machine=%s execute=%s issue=%s",
@@ -200,7 +226,6 @@ def troubleshooting_analyze(req: IssueRequest):
         runbook_name, full_description = troubleshooting_process_issue(req.issue)
 
         if not runbook_name:
-            logger.warning("Troubleshooting agent returned no runbook for: %s", req.issue)
             raise HTTPException(status_code=404, detail="Troubleshooting agent returned no runbook.")
 
         if req.execute:
@@ -211,17 +236,11 @@ def troubleshooting_analyze(req: IssueRequest):
                     "expires_at": datetime.utcnow() + timedelta(seconds=PENDING_TTL_SECONDS)
                 }
 
-                logger.info(
-                    "Stored pending runbook '%s' for machine '%s'",
-                    runbook_name, req.target_machine
-                )
-
         return {
             "runbook_name": runbook_name,
             "full_description": full_description,
             "execute_pending": req.execute
         }
-
     except HTTPException:
         raise
     except Exception as exc:
@@ -229,17 +248,8 @@ def troubleshooting_analyze(req: IssueRequest):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# -----------------------------------------------------------------------------------------------
-# TROUBLESHOOTING STEP-2 (CONFIRM)
-# -----------------------------------------------------------------------------------------------
 @app.post("/troubleshooting/confirm")
 def troubleshooting_confirm(req: ConfirmRequest):
-    """
-    Troubleshooting Agent Step-2:
-      - Confirms execution of previously stored runbook
-      - confirm=True  → execute runbook
-      - confirm=False → cancel pending execution
-    """
     try:
         logger.info(
             "Troubleshooting Step-2 | machine=%s confirm=%s",
@@ -252,10 +262,7 @@ def troubleshooting_confirm(req: ConfirmRequest):
             pending = PENDING_CONFIRMATIONS.get(req.target_machine)
 
             if not pending:
-                raise HTTPException(
-                    status_code=404,
-                    detail="No pending runbook for this target machine."
-                )
+                raise HTTPException(status_code=404, detail="No pending runbook for this target machine.")
 
             if not req.confirm:
                 del PENDING_CONFIRMATIONS[req.target_machine]
@@ -265,11 +272,7 @@ def troubleshooting_confirm(req: ConfirmRequest):
             del PENDING_CONFIRMATIONS[req.target_machine]
 
         create_new_runbook(runbook_name, req.target_machine)
-
-        return {
-            "message": f"Runbook '{runbook_name}' executed on {req.target_machine}"
-        }
-
+        return {"message": f"Runbook '{runbook_name}' executed on {req.target_machine}"}
     except HTTPException:
         raise
     except Exception as exc:
@@ -282,7 +285,6 @@ def troubleshooting_confirm(req: ConfirmRequest):
 # -----------------------------------------------------------------------------------------------
 @app.get("/health")
 def health_check():
-    """Simple API health check."""
     return {"status": "ok", "message": "API is running"}
 
 

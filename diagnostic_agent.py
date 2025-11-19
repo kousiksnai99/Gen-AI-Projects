@@ -1,32 +1,18 @@
 #################################################################################################
 ## Project Name   : Agentic AI POC
-## Business Owner : Data and AIA
-## Author/Team    : POC Team
-## Date           : 29th Oct 2025
-## Purpose        :
-##   Diagnostic Agent module for processing user-provided issue summaries through Azure AI Agent
-##   services and extracting the name of the relevant automation runbook.
-##
-##   Key Functionalities:
-##     - Connects to Azure Automation & Azure AI Agent services.
-##     - Sends issue text to a Diagnostic AI Agent.
-##     - Retrieves and returns the corresponding runbook name.
-##
-## Notes:
-##   - This file follows DSET-standardized structure, comments, naming, and logging.
-##   - No additional integrations added as per request.
+## Diagnostic Agent (instrumented with Time_Logger)
 #################################################################################################
-
 
 # ###############  IMPORT PACKAGES  ###############
 import logging
+from datetime import datetime
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential, AzureCliCredential
 from azure.ai.agents.models import ListSortOrder
 from azure.mgmt.automation import AutomationClient
 
 import config
-from utils import create_new_runbook
+from utils import create_new_runbook  # create_new_runbook now accepts time_logger optional
 
 
 # ###############  CONFIGURATION CONSTANTS  ###############
@@ -34,11 +20,6 @@ SUBSCRIPTION_ID = config.SUBSCRIPTION_ID
 RESOURCE_GROUP = config.RESOURCE_GROUP
 AUTOMATION_ACCOUNT = config.AUTOMATION_ACCOUNT
 LOCATION = config.LOCATION
-
-# Default values for runbook creation
-SCRIPT_TEXT = "test"
-RUNBOOK_TYPE = "PowerShell"
-
 
 # ###############  LOGGING CONFIGURATION  ###############
 logging.basicConfig(
@@ -48,115 +29,83 @@ logging.basicConfig(
 logger = logging.getLogger("diagnostic_agent")
 
 
-# ###############  AZURE CLIENT INITIALIZATION  ###############
-# Authenticate using DefaultAzureCredential (Supports MI, CLI, Env)
-default_credential = DefaultAzureCredential()
-
-# Azure Automation client
-automation_client = AutomationClient(default_credential, SUBSCRIPTION_ID)
-
-# Azure AI Project client (CLI credential)
-ai_project_client = AIProjectClient(
-    credential=AzureCliCredential(),
-    endpoint=config.MODEL_ENDPOINT
-)
-
-# Fetch Diagnostic AI Agent instance
-diagnostic_agent = ai_project_client.agents.get_agent(config.DIAGNOSTIC_AGENT_ID)
+# ###############  AZURE CLIENT INIT (lazy inside function where we timestamp creds)  ###############
+def _now_isoutc() -> str:
+    return datetime.utcnow().isoformat(timespec="microseconds") + "Z"
 
 
-# ###############  FUNCTION: process_issue  ###############
-def process_issue(issue: str) -> str | None:
+def process_issue(issue: str) -> tuple[str | None, dict]:
     """
-    Sends an issue description to the Azure Diagnostic AI Agent and extracts the
-    recommended runbook name from the response messages.
+    Sends an issue to the Azure Diagnostic AI Agent and returns:
+      - runbook_name (or None)
+      - time_logger dict containing timing checkpoints for the agent portion
 
-    Args:
-        issue (str):
-            The text describing the user's problem or issue.
-
-    Returns:
-        str | None:
-            The name of the runbook returned by the Diagnostic AI Agent,
-            or None if no runbook was found or processing failed.
-
-    Flow:
-        1. Create a new AI agent thread.
-        2. Add the issue text as a message.
-        3. Run the agent on the thread.
-        4. Retrieve and parse the resulting messages.
+    Note: This function preserves existing behavior and adds timing instrumentation.
     """
+    time_logger: dict = {}
+
     try:
-        logger.info("Processing diagnostic issue: %s", issue)
+        time_logger["Foundry_Start"] = _now_isoutc()
 
-        # Step 1: Create a new thread
+        # Authenticate (DefaultAzureCredential + CLI for AIProjectClient) — mark credential window
+        time_logger["Cred_Start"] = _now_isoutc()
+        default_credential = DefaultAzureCredential()
+        ai_project_client = AIProjectClient(
+            credential=AzureCliCredential(),
+            endpoint=config.MODEL_ENDPOINT
+        )
+        diagnostic_agent = ai_project_client.agents.get_agent(config.DIAGNOSTIC_AGENT_ID)
+        time_logger["Cred_End"] = _now_isoutc()
+
+        # Create new thread
+        time_logger["Foundry_Thread_Create_Start"] = _now_isoutc()
         thread = ai_project_client.agents.threads.create()
-        logger.debug("Created new diagnostic thread: %s", thread.id)
+        time_logger["Foundry_Thread_Create_End"] = _now_isoutc()
 
-        # Step 2: Send user message to the thread
+        # Post message
+        time_logger["Foundry_Message_Post_Start"] = _now_isoutc()
         ai_project_client.agents.messages.create(
             thread_id=thread.id,
             role="user",
             content=issue
         )
-        logger.debug("Posted issue message to diagnostic thread")
+        time_logger["Foundry_Message_Post_End"] = _now_isoutc()
 
-        # Step 3: Run the diagnostic agent
+        # Execute agent run
+        time_logger["Foundry_Run_Start"] = _now_isoutc()
         run = ai_project_client.agents.runs.create_and_process(
             thread_id=thread.id,
             agent_id=diagnostic_agent.id
         )
+        time_logger["Foundry_Run_End"] = _now_isoutc()
 
-        # Step 4: Handle run failure
         if run.status == "failed":
             logger.error("Diagnostic AI agent run failed: %s", run.last_error)
-            return None
+            time_logger["Foundry_End"] = _now_isoutc()
+            return None, time_logger
 
-        # Step 5: Retrieve messages to extract runbook name
+        # Retrieve messages
+        time_logger["Foundry_Retrieve_Start"] = _now_isoutc()
         messages = ai_project_client.agents.messages.list(
             thread_id=thread.id,
             order=ListSortOrder.ASCENDING
         )
+        time_logger["Foundry_Retrieve_End"] = _now_isoutc()
 
+        # Extract runbook name
+        time_logger["Runbook_Resolution_Start"] = _now_isoutc()
         runbook_name: str | None = None
-
         for message in messages:
             if message.text_messages:
-                # Assume the final text message contains the runbook name
                 runbook_name = message.text_messages[-1].text.value
+        time_logger["Runbook_Resolution_End"] = _now_isoutc()
 
-        # Step 6: Return runbook name if found
-        if runbook_name:
-            logger.info("Diagnostic agent returned runbook: %s", runbook_name)
-            return runbook_name
+        time_logger["Foundry_End"] = _now_isoutc()
 
-        logger.info("No runbook name found in diagnostic agent response.")
-        return None
-
-
-    "Time_Logger": {
-        "JSON_Parser_Start": "2025-11-19T05:40:05.628385Z",
-        "JSON_Parser_End": "2025-11-19T05:40:05.628415Z",
-        "Schema_Validation_Start": "2025-11-19T05:40:05.628418Z",
-        "Schema_Validation_End": "2025-11-19T05:40:05.628426Z",
-        "Config_Start": "2025-11-19T05:40:05.628428Z",
-        "Config_End": "2025-11-19T05:40:05.628534Z",
-        "Cred_Start": "2025-11-19T05:40:05.628538Z",
-        "Cred_End": "2025-11-19T05:40:05.638694Z",
-        "Automation_Start": "2025-11-19T05:40:05.638705Z",
-        "Automation_End": "2025-11-19T05:40:05.639080Z",
-        "Foundry_Start": "2025-11-19T05:40:05.639087Z",
-        "Foundry_End": "2025-11-19T05:40:05.639214Z",
-        "Event_Logger_Start": "2025-11-19T05:40:05.639219Z",
-        "Event_Logger_End": "2025-11-19T05:40:05.639327Z",
-        "Runbook_Resolution_Start": "2025-11-19T05:40:05.639331Z",
-        "Runbook_Resolution_End": "2025-11-19T05:40:12.748618Z",
-        "Cloning_Start": "2025-11-19T05:40:12.748631Z",
-        "Cloning_End": "2025-11-19T05:40:15.923050Z"
-    }
-}
+        logger.info("Diagnostic agent returned runbook: %s", runbook_name)
+        return runbook_name, time_logger
 
     except Exception as exc:
+        time_logger["Foundry_End"] = _now_isoutc()
         logger.exception("Exception occurred while processing diagnostic issue: %s", exc)
-        return None
-
+        return None, time_logger

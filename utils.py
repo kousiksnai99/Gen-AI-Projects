@@ -325,4 +325,22 @@ def get_output_by_runbook_name(runbook_name: str) -> str:
         logger.error("Error fetching output for runbook '%s': %s", runbook_name, exc)
         return f"Error: {exc}"
 
+# -----------------------------------------------------------------------------------------------
+# DIRECT TERMINAL TESTING (ONLY RUNS WHEN utils.py IS EXECUTED DIRECTLY)
+# -----------------------------------------------------------------------------------------------
+if __name__ == "__main__":
+    print("====== Azure Runbook Output Fetch Test ======")
+    runbook_name = input("Enter executed runbook name: ")
+
+    print("\nFetching output... Please wait...\n")
+
+    try:
+        result = get_output_by_runbook_name(runbook_name)
+        print("------------ OUTPUT START ------------")
+        print(result)
+        print("------------- OUTPUT END -------------")
+
+    except Exception as exc:
+        print(f"ERROR: {exc}")
+
 

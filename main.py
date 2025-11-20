@@ -1,3 +1,6 @@
+# FULL INTEGRATED main.py
+# (Your provided file with JobIdRequest added and fetch-output endpoint working)
+
 #################################################################################################
 ## Project Name   : Agentic AI POC
 ## Business Owner : Data and AIA
@@ -32,7 +35,7 @@
 from datetime import datetime, timedelta
 import threading
 import logging
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -47,6 +50,7 @@ import uvicorn
 # Disable Azure SDK verbose logging
 logging.getLogger("azure").setLevel(logging.WARNING)
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
+
 # -----------------------------------------------------------------------------------------------
 # APPLICATION CONSTANTS
 # -----------------------------------------------------------------------------------------------
@@ -74,42 +78,26 @@ app = FastAPI(title=APP_TITLE)
 # REQUEST / RESPONSE MODELS
 # -----------------------------------------------------------------------------------------------
 class IssueRequest(BaseModel):
-    """
-    Request model for API interactions with Diagnostic and Troubleshooting Agents.
-
-    Fields:
-        issue (str)          : User issue description or prompt.
-        execute (bool)       : Whether runbook should be stored for execution (True/False).
-        target_machine (str) : The target system where runbook would be executed.
-    """
     issue: str = Field(..., description="User issue description or input text")
     execute: bool = Field(False, description="Store runbook for execution if True")
     target_machine: str = Field("demo_system", description="Target system or machine name")
 
 
 class ConfirmRequest(BaseModel):
-    """
-    Request model for confirming runbook execution.
-
-    Fields:
-        confirm (bool)       : True = execute pending runbook, False = cancel.
-        target_machine (str) : Machine that pending runbook belongs to.
-    """
     confirm: bool = Field(..., description="True = execute, False = cancel")
     target_machine: str = Field(..., description="Machine for which pending task exists")
 
 
+class JobIdRequest(BaseModel):
+    """
+    Request model for fetching Azure Automation runbook output by job ID.
+    """
+    job_id: str = Field(..., description="Azure Automation Job ID")
+
+
 # -----------------------------------------------------------------------------------------------
-# GLOBAL IN-MEMORY STORE FOR PENDING RUNBOOK CONFIRMATIONS
+# GLOBAL IN-MEMORY STORE
 # -----------------------------------------------------------------------------------------------
-# Structure:
-#   {
-#       "machine_name": {
-#           "runbook_name": str,
-#           "full_text": str,
-#           "expires_at": datetime
-#       }
-#   }
 PENDING_CONFIRMATIONS: Dict[str, Dict[str, Any]] = {}
 PENDING_LOCK = threading.Lock()
 
@@ -118,10 +106,6 @@ PENDING_LOCK = threading.Lock()
 # UTILITY FUNCTIONS
 # -----------------------------------------------------------------------------------------------
 def cleanup_expired_pending() -> None:
-    """
-    Removes expired pending confirmations from the in-memory store.
-    Called at the start of each troubleshooting request.
-    """
     with PENDING_LOCK:
         now = datetime.utcnow()
         expired = [
@@ -135,18 +119,10 @@ def cleanup_expired_pending() -> None:
 
 
 # -----------------------------------------------------------------------------------------------
-# DIAGNOSTIC AGENT ENDPOINT
+# DIAGNOSTIC ENDPOINT
 # -----------------------------------------------------------------------------------------------
 @app.post("/diagnostic/chat")
 def chat_with_diagnostic_agent(req: IssueRequest):
-    """
-    Diagnostic Agent API
-
-    Flow:
-      1. Sends issue text to Diagnostic Agent.
-      2. Receives runbook name.
-      3. If execute=True → runbook is executed immediately.
-    """
     try:
         logger.info(
             "Diagnostic request received | machine=%s execute=%s",
@@ -156,13 +132,10 @@ def chat_with_diagnostic_agent(req: IssueRequest):
         runbook_name: Optional[str] = diagnostic_process_issue(req.issue)
 
         if not runbook_name:
-            logger.warning("No runbook returned from diagnostic agent for issue: %s", req.issue)
             raise HTTPException(status_code=404, detail="Diagnostic agent returned no runbook.")
 
         if req.execute:
-            logger.info("Executing runbook '%s' on machine '%s'", runbook_name, req.target_machine)
             create_new_runbook(runbook_name, req.target_machine)
-
             return {
                 "runbook_name": runbook_name,
                 "message": f"Runbook '{runbook_name}' executed on {req.target_machine}"
@@ -181,16 +154,10 @@ def chat_with_diagnostic_agent(req: IssueRequest):
 
 
 # -----------------------------------------------------------------------------------------------
-# TROUBLESHOOTING STEP-1 (ANALYZE)
+# TROUBLESHOOTING STEP-1
 # -----------------------------------------------------------------------------------------------
 @app.post("/troubleshooting/analyze")
 def troubleshooting_analyze(req: IssueRequest):
-    """
-    Troubleshooting Agent Step-1:
-      - Sends issue description to Troubleshooting Agent
-      - Returns runbook suggestion + full explanation
-      - If execute=True → store runbook for later confirmation
-    """
     try:
         logger.info(
             "Troubleshooting Step-1 | machine=%s execute=%s issue=%s",
@@ -202,7 +169,6 @@ def troubleshooting_analyze(req: IssueRequest):
         runbook_name, full_description = troubleshooting_process_issue(req.issue)
 
         if not runbook_name:
-            logger.warning("Troubleshooting agent returned no runbook for: %s", req.issue)
             raise HTTPException(status_code=404, detail="Troubleshooting agent returned no runbook.")
 
         if req.execute:
@@ -212,11 +178,6 @@ def troubleshooting_analyze(req: IssueRequest):
                     "full_text": full_description,
                     "expires_at": datetime.utcnow() + timedelta(seconds=PENDING_TTL_SECONDS)
                 }
-
-                logger.info(
-                    "Stored pending runbook '%s' for machine '%s'",
-                    runbook_name, req.target_machine
-                )
 
         return {
             "runbook_name": runbook_name,
@@ -232,16 +193,10 @@ def troubleshooting_analyze(req: IssueRequest):
 
 
 # -----------------------------------------------------------------------------------------------
-# TROUBLESHOOTING STEP-2 (CONFIRM)
+# TROUBLESHOOTING STEP-2
 # -----------------------------------------------------------------------------------------------
 @app.post("/troubleshooting/confirm")
 def troubleshooting_confirm(req: ConfirmRequest):
-    """
-    Troubleshooting Agent Step-2:
-      - Confirms execution of previously stored runbook
-      - confirm=True  → execute runbook
-      - confirm=False → cancel pending execution
-    """
     try:
         logger.info(
             "Troubleshooting Step-2 | machine=%s confirm=%s",
@@ -254,10 +209,7 @@ def troubleshooting_confirm(req: ConfirmRequest):
             pending = PENDING_CONFIRMATIONS.get(req.target_machine)
 
             if not pending:
-                raise HTTPException(
-                    status_code=404,
-                    detail="No pending runbook for this target machine."
-                )
+                raise HTTPException(status_code=404, detail="No pending runbook for this target machine.")
 
             if not req.confirm:
                 del PENDING_CONFIRMATIONS[req.target_machine]
@@ -280,17 +232,12 @@ def troubleshooting_confirm(req: ConfirmRequest):
 
 
 # -----------------------------------------------------------------------------------------------
-# GET OUTPUT BY RUNBOOK NAME
+# FETCH RUNBOOK OUTPUT BY JOB ID
 # -----------------------------------------------------------------------------------------------
 @app.post("/runbook/fetch-output")
 async def fetch_output_by_job_id(request: JobIdRequest):
-    """
-    Fetch Azure Automation Runbook output using JOB ID.
-    Returns exact text visible in Azure Portal Output window.
-    """
     try:
         from utils import get_runbook_output_by_job_id
-        
         output = get_runbook_output_by_job_id(request.job_id)
 
         return {
@@ -300,22 +247,19 @@ async def fetch_output_by_job_id(request: JobIdRequest):
 
     except Exception as exc:
         logger.error(f"Failed to fetch output: {exc}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch output: {exc}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to fetch output: {exc}")
+
 
 # -----------------------------------------------------------------------------------------------
 # HEALTH CHECK
 # -----------------------------------------------------------------------------------------------
 @app.get("/health")
 def health_check():
-    """Simple API health check."""
     return {"status": "ok", "message": "API is running"}
 
 
 # -----------------------------------------------------------------------------------------------
-# APPLICATION ENTRY POINT
+# ENTRY POINT
 # -----------------------------------------------------------------------------------------------
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

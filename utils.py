@@ -260,4 +260,69 @@ def create_new_runbook(runbook_name: str, system_name: str) -> None:
     except Exception as exc:
         logger.error("Failed to execute runbook '%s': %s", new_runbook_name, exc)
 
-Diagnose_KB0010265_demo_syetem_20251120_161155
+# ###############  FUNCTION: get_output_by_runbook_name ###############
+def get_output_by_runbook_name(runbook_name: str) -> str:
+    """
+    Fetch execution output of the latest job for the given runbook name.
+
+    Args:
+        runbook_name (str): Name of the executed runbook.
+
+    Returns:
+        str: Output logs (stdout) OR error message.
+    """
+    try:
+        credential = DefaultAzureCredential()
+        client = AutomationClient(credential, config.SUBSCRIPTION_ID)
+
+        logger.info("Searching jobs for runbook: %s", runbook_name)
+
+        # ----------------------------------------------------------------------
+        # Find latest job matching the runbook name
+        # ----------------------------------------------------------------------
+        job_list = client.job.list(
+            resource_group_name=config.RESOURCE_GROUP,
+            automation_account_name=config.AUTOMATION_ACCOUNT
+        )
+
+        matched_jobs = [
+            job for job in job_list
+            if job.properties and
+               job.properties.runbook and
+               job.properties.runbook.name == runbook_name
+        ]
+
+        if not matched_jobs:
+            return f"No jobs found for runbook '{runbook_name}'"
+
+        # Sort by creation time DESC → latest first
+        matched_jobs.sort(
+            key=lambda j: j.properties.creation_time, reverse=True
+        )
+
+        latest_job = matched_jobs[0]
+        job_id = latest_job.name
+
+        logger.info("Latest job found: %s", job_id)
+
+        # ----------------------------------------------------------------------
+        # Fetch output of the job
+        # ----------------------------------------------------------------------
+        output_stream = client.job.get_output(
+            resource_group_name=config.RESOURCE_GROUP,
+            automation_account_name=config.AUTOMATION_ACCOUNT,
+            job_name=job_id
+        )
+
+        if hasattr(output_stream, "read"):
+            output_text = output_stream.read().decode("utf-8")
+        else:
+            output_text = str(output_stream)
+
+        return output_text
+
+    except Exception as exc:
+        logger.error("Error fetching output for runbook '%s': %s", runbook_name, exc)
+        return f"Error: {exc}"
+
+

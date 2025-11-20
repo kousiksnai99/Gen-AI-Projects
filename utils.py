@@ -263,18 +263,21 @@ def create_new_runbook(runbook_name: str, system_name: str) -> None:
 # ###############  FUNCTION: get_output_by_runbook_name ###############
 def get_runbook_output_by_job_id(job_id: str) -> str:
     """
-    Fetch Azure Automation runbook output directly using JOB ID.
-    This always returns the same output shown in the Azure portal.
+    Fetch Azure Automation runbook output using JOB ID.
+    Works for all regions including Sweden Central.
     """
     try:
         credential = DefaultAzureCredential()
         token = credential.get_token("https://management.azure.com/.default").token
-        
+
+        # ✔ FIX: Updated API version for Sweden Central
+        api_version = "2023-11-01"
+
         output_url = (
             f"https://management.azure.com/subscriptions/{config.SUBSCRIPTION_ID}"
             f"/resourceGroups/{config.RESOURCE_GROUP}"
             f"/providers/Microsoft.Automation/automationAccounts/{config.AUTOMATION_ACCOUNT}"
-            f"/jobs/{job_id}/output?api-version=2021-06-22"
+            f"/jobs/{job_id}/output?api-version={api_version}"
         )
 
         headers = {"Authorization": f"Bearer {token}"}
@@ -311,3 +314,4 @@ Traceback (most recent call last):
     raise Exception(f"Failed to fetch job output: {resp.text}")
 Exception: Failed to fetch job output: {"error":{"code":"NoRegisteredProviderFound","message":"No registered resource provider found for location 'swedencentral' and API version '2021-06-22' for type 'automationAccounts/jobs'. The supported api-versions are '2015-01-01-preview, 2015-10-31, 2017-05-15-preview, 2018-01-15, 2018-06-30, 2019-06-01, 2020-01-13-preview, 2022-08-08, 2023-05-15-preview, 2023-11-01, 2024-10-23'. The supported locations are 'japaneast, eastus2, westeurope, southafricanorth, ukwest, switzerlandnorth, brazilsoutheast, norwayeast, germanywestcentral, uaenorth, switzerlandwest, japanwest, uaecentral, australiacentral2, southindia, francesouth, norwaywest, westus3, koreasouth, swedencentral, southeastasia, southcentralus, northcentralus, eastasia, centralus, westus, australiacentral, australiaeast, koreacentral, eastus, westus2, brazilsouth, uksouth, westcentralus, northeurope, canadacentral, australiasoutheast, centralindia, francecentral, jioindiawest, jioindiacentral, qatarcentral, southafricawest, polandcentral, israelcentral, germanynorth, italynorth, canadaeast, spaincentral'."}}
 ERROR: Failed to fetch job output: {"error":{"code":"NoRegisteredProviderFound","message":"No registered resource provider found for location 'swedencentral' and API version '2021-06-22' for type 'automationAccounts/jobs'. The supported api-versions are '2015-01-01-preview, 2015-10-31, 2017-05-15-preview, 2018-01-15, 2018-06-30, 2019-06-01, 2020-01-13-preview, 2022-08-08, 2023-05-15-preview, 2023-11-01, 2024-10-23'. The supported locations are 'japaneast, eastus2, westeurope, southafricanorth, ukwest, switzerlandnorth, brazilsoutheast, norwayeast, germanywestcentral, uaenorth, switzerlandwest, japanwest, uaecentral, australiacentral2, southindia, francesouth, norwaywest, westus3, koreasouth, swedencentral, southeastasia, southcentralus, northcentralus, eastasia, centralus, westus, australiacentral, australiaeast, koreacentral, eastus, westus2, brazilsouth, uksouth, westcentralus, northeurope, canadacentral, australiasoutheast, centralindia, francecentral, jioindiawest, jioindiacentral, qatarcentral, southafricawest, polandcentral, israelcentral, germanynorth, italynorth, canadaeast, spaincentral'."}}
+

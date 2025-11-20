@@ -261,69 +261,67 @@ def create_new_runbook(runbook_name: str, system_name: str) -> None:
         logger.error("Failed to execute runbook '%s': %s", new_runbook_name, exc)
 
 # ###############  FUNCTION: get_output_by_runbook_name ###############
-def get_output_by_runbook_name(runbook_name: str) -> str:
+def get_runbook_job_output(runbook_name: str) -> str:
     """
-    Fetch execution output of the latest job for the given runbook name.
-
-    Args:
-        runbook_name (str): Name of the executed runbook.
-
-    Returns:
-        str: Output logs (stdout) OR error message.
+    Fetches the latest executed job output for a given runbook name.
+    Returns the full output text exactly as shown in Azure Portal.
     """
+
     try:
         credential = DefaultAzureCredential()
-        client = AutomationClient(credential, config.SUBSCRIPTION_ID)
+        token = credential.get_token("https://management.azure.com/.default").token
 
-        logger.info("Searching jobs for runbook: %s", runbook_name)
-
-        # ----------------------------------------------------------------------
-        # Find latest job matching the runbook name
-        # ----------------------------------------------------------------------
-        job_list = client.job.list(
-            resource_group_name=config.RESOURCE_GROUP,
-            automation_account_name=config.AUTOMATION_ACCOUNT
+        # ------------------------------
+        # 1. Fetch all jobs for this automation account
+        # ------------------------------
+        jobs_url = (
+            f"https://management.azure.com/subscriptions/{config.SUBSCRIPTION_ID}"
+            f"/resourceGroups/{config.RESOURCE_GROUP}"
+            f"/providers/Microsoft.Automation/automationAccounts/{config.AUTOMATION_ACCOUNT}"
+            f"/jobs?api-version=2021-06-22"
         )
 
-        matched_jobs = [
-            job for job in job_list
-            if job.properties and
-               job.properties.runbook and
-               job.properties.runbook.name == runbook_name
-        ]
+        headers = {"Authorization": f"Bearer {token}"}
 
-        if not matched_jobs:
-            return f"No jobs found for runbook '{runbook_name}'"
+        jobs_resp = requests.get(jobs_url, headers=headers).json()
 
-        # Sort by creation time DESC → latest first
-        matched_jobs.sort(
-            key=lambda j: j.properties.creation_time, reverse=True
+        job_list = jobs_resp.get("value", [])
+
+        # ------------------------------
+        # 2. Find the latest job whose runbook name starts with runbook_name
+        # ------------------------------
+        matched_job = None
+        for job in sorted(job_list, key=lambda x: x["properties"]["creationTime"], reverse=True):
+            rb = job["properties"]["runbook"]["name"]
+            if rb.startswith(runbook_name):
+                matched_job = job
+                break
+
+        if not matched_job:
+            raise Exception(f"No job found for runbook '{runbook_name}'")
+
+        job_id = matched_job["name"]
+
+        # ------------------------------
+        # 3. Fetch job output
+        # ------------------------------
+        output_url = (
+            f"https://management.azure.com/subscriptions/{config.SUBSCRIPTION_ID}"
+            f"/resourceGroups/{config.RESOURCE_GROUP}"
+            f"/providers/Microsoft.Automation/automationAccounts/{config.AUTOMATION_ACCOUNT}"
+            f"/jobs/{job_id}/output?api-version=2021-06-22"
         )
 
-        latest_job = matched_jobs[0]
-        job_id = latest_job.name
+        output_resp = requests.get(output_url, headers=headers)
 
-        logger.info("Latest job found: %s", job_id)
+        if output_resp.status_code != 200:
+            raise Exception(f"Failed to fetch job output: {output_resp.text}")
 
-        # ----------------------------------------------------------------------
-        # Fetch output of the job
-        # ----------------------------------------------------------------------
-        output_stream = client.job.get_output(
-            resource_group_name=config.RESOURCE_GROUP,
-            automation_account_name=config.AUTOMATION_ACCOUNT,
-            job_name=job_id
-        )
-
-        if hasattr(output_stream, "read"):
-            output_text = output_stream.read().decode("utf-8")
-        else:
-            output_text = str(output_stream)
-
-        return output_text
+        return output_resp.text
 
     except Exception as exc:
-        logger.error("Error fetching output for runbook '%s': %s", runbook_name, exc)
-        return f"Error: {exc}"
+        logger.exception("Error fetching job output: %s", exc)
+        raise
 
 # -----------------------------------------------------------------------------------------------
 # DIRECT TERMINAL TESTING (ONLY RUNS WHEN utils.py IS EXECUTED DIRECTLY)
@@ -342,5 +340,6 @@ if __name__ == "__main__":
 
     except Exception as exc:
         print(f"ERROR: {exc}")
+
 
 

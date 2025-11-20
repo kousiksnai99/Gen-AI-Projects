@@ -26,6 +26,9 @@ from azure.identity import AzureCliCredential
 from azure.ai.agents.models import ListSortOrder
 import config
 
+# Disable Azure SDK verbose logging
+logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 
 # ###############  LOGGING CONFIGURATION ###############
 logging.basicConfig(

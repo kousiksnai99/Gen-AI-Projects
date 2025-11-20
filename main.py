@@ -280,6 +280,33 @@ def troubleshooting_confirm(req: ConfirmRequest):
 
 
 # -----------------------------------------------------------------------------------------------
+# GET OUTPUT BY RUNBOOK NAME
+# -----------------------------------------------------------------------------------------------
+@app.get("/runbook/output/by-name")
+def get_output_by_runbook_name_api(runbook_name: str):
+    """
+    Fetch output logs for the latest job of a given runbook.
+
+    Example:
+        /runbook/output/by-name?runbook_name=Diagnose_KB0010265_demo_system_20251120_161155
+    """
+    try:
+        from utils import get_output_by_runbook_name
+
+        logger.info("API request | Fetch output for runbook=%s", runbook_name)
+
+        output_text = get_output_by_runbook_name(runbook_name)
+
+        return {
+            "runbook_name": runbook_name,
+            "output": output_text
+        }
+
+    except Exception as exc:
+        logger.exception("Error in /runbook/output/by-name: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to fetch output")
+
+# -----------------------------------------------------------------------------------------------
 # HEALTH CHECK
 # -----------------------------------------------------------------------------------------------
 @app.get("/health")

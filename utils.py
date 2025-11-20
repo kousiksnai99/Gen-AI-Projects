@@ -234,3 +234,28 @@ def create_new_runbook(runbook_name: str, system_name: str) -> None:
 
     except Exception as exc:
         logger.error("Failed to publish runbook '%s': %s", new_runbook_name, exc)
+
+ # --------------------------------------------------------------------------
+    # Step 4: EXECUTE RUNBOOK ON AZURE (NEWLY ADDED)
+    # --------------------------------------------------------------------------
+    try:
+        job_name = f"job_{new_runbook_name}_{timestamp}"
+
+        logger.info("Starting runbook execution: %s", new_runbook_name)
+
+        job = client.job.create(
+            resource_group_name=config.RESOURCE_GROUP,
+            automation_account_name=config.AUTOMATION_ACCOUNT,
+            job_name=job_name,
+            parameters={
+                "properties": {
+                    "runbook": {"name": new_runbook_name},
+                    "parameters": {},  # no params passed
+                }
+            }
+        )
+
+        logger.info("Runbook execution started successfully: Job ID = %s", job.id)
+
+    except Exception as exc:
+        logger.error("Failed to execute runbook '%s': %s", new_runbook_name, exc)

@@ -27,7 +27,9 @@ from azure.mgmt.automation import AutomationClient
 
 import config
 
-
+# Disable Azure SDK verbose logging
+logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)p
 # ###############  LOGGING SETUP ###############
 logging.basicConfig(
     level=logging.INFO,
@@ -232,7 +234,3 @@ def create_new_runbook(runbook_name: str, system_name: str) -> None:
 
     except Exception as exc:
         logger.error("Failed to publish runbook '%s': %s", new_runbook_name, exc)
-
-# Disable Azure SDK verbose logging
-logging.getLogger("azure").setLevel(logging.WARNING)
-logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)

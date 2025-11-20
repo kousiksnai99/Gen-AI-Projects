@@ -342,5 +342,12 @@ if __name__ == "__main__":
         print(f"ERROR: {exc}")
 
 
+2025-11-20 18:36:07,388 [ERROR] automation_helpers - Error fetching job output: No job found for runbook 'Diagnose_KB0010265_demo_syetem_20251120_181836 '
+Traceback (most recent call last):
+  File "F:\Kousik\helpdesk_assistant\utils.py", line 301, in get_runbook_job_output
+    raise Exception(f"No job found for runbook '{runbook_name}'")
+Exception: No job found for runbook 'Diagnose_KB0010265_demo_syetem_20251120_181836 '
+ERROR: No job found for runbook 'Diagnose_KB0010265_demo_syetem_20251120_181836 '
+
 
 

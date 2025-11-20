@@ -29,7 +29,7 @@ import config
 
 # Disable Azure SDK verbose logging
 logging.getLogger("azure").setLevel(logging.WARNING)
-logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)p
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 # ###############  LOGGING SETUP ###############
 logging.basicConfig(
     level=logging.INFO,
@@ -340,6 +340,7 @@ if __name__ == "__main__":
 
     except Exception as exc:
         print(f"ERROR: {exc}")
+
 
 
 

@@ -261,50 +261,15 @@ def create_new_runbook(runbook_name: str, system_name: str) -> None:
         logger.error("Failed to execute runbook '%s': %s", new_runbook_name, exc)
 
 # ###############  FUNCTION: get_output_by_runbook_name ###############
-def get_runbook_job_output(runbook_name: str) -> str:
+def get_runbook_output_by_job_id(job_id: str) -> str:
     """
-    Fetches the latest executed job output for a given runbook name.
-    Returns the full output text exactly as shown in Azure Portal.
+    Fetch Azure Automation runbook output directly using JOB ID.
+    This always returns the same output shown in the Azure portal.
     """
-
     try:
         credential = DefaultAzureCredential()
         token = credential.get_token("https://management.azure.com/.default").token
-
-        # ------------------------------
-        # 1. Fetch all jobs for this automation account
-        # ------------------------------
-        jobs_url = (
-            f"https://management.azure.com/subscriptions/{config.SUBSCRIPTION_ID}"
-            f"/resourceGroups/{config.RESOURCE_GROUP}"
-            f"/providers/Microsoft.Automation/automationAccounts/{config.AUTOMATION_ACCOUNT}"
-            f"/jobs?api-version=2021-06-22"
-        )
-
-        headers = {"Authorization": f"Bearer {token}"}
-
-        jobs_resp = requests.get(jobs_url, headers=headers).json()
-
-        job_list = jobs_resp.get("value", [])
-
-        # ------------------------------
-        # 2. Find the latest job whose runbook name starts with runbook_name
-        # ------------------------------
-        matched_job = None
-        for job in sorted(job_list, key=lambda x: x["properties"]["creationTime"], reverse=True):
-            rb = job["properties"]["runbook"]["name"]
-            if rb.startswith(runbook_name):
-                matched_job = job
-                break
-
-        if not matched_job:
-            raise Exception(f"No job found for runbook '{runbook_name}'")
-
-        job_id = matched_job["name"]
-
-        # ------------------------------
-        # 3. Fetch job output
-        # ------------------------------
+        
         output_url = (
             f"https://management.azure.com/subscriptions/{config.SUBSCRIPTION_ID}"
             f"/resourceGroups/{config.RESOURCE_GROUP}"
@@ -312,43 +277,26 @@ def get_runbook_job_output(runbook_name: str) -> str:
             f"/jobs/{job_id}/output?api-version=2021-06-22"
         )
 
-        output_resp = requests.get(output_url, headers=headers)
+        headers = {"Authorization": f"Bearer {token}"}
 
-        if output_resp.status_code != 200:
-            raise Exception(f"Failed to fetch job output: {output_resp.text}")
+        resp = requests.get(output_url, headers=headers)
 
-        return output_resp.text
+        if resp.status_code != 200:
+            raise Exception(f"Failed to fetch job output: {resp.text}")
+
+        return resp.text
 
     except Exception as exc:
         logger.exception("Error fetching job output: %s", exc)
         raise
 
-# -----------------------------------------------------------------------------------------------
-# DIRECT TERMINAL TESTING (ONLY RUNS WHEN utils.py IS EXECUTED DIRECTLY)
-# -----------------------------------------------------------------------------------------------
 if __name__ == "__main__":
-    print("====== Azure Runbook Output Fetch Test ======")
-    runbook_name = input("Enter executed runbook name: ")
-
-    print("\nFetching output... Please wait...\n")
+    job_id = input("Enter Azure Automation Job ID: ")
 
     try:
-        result = get_output_by_runbook_name(runbook_name)
-        print("------------ OUTPUT START ------------")
-        print(result)
-        print("------------- OUTPUT END -------------")
-
-    except Exception as exc:
-        print(f"ERROR: {exc}")
-
-
-2025-11-20 18:36:07,388 [ERROR] automation_helpers - Error fetching job output: No job found for runbook 'Diagnose_KB0010265_demo_syetem_20251120_181836 '
-Traceback (most recent call last):
-  File "F:\Kousik\helpdesk_assistant\utils.py", line 301, in get_runbook_job_output
-    raise Exception(f"No job found for runbook '{runbook_name}'")
-Exception: No job found for runbook 'Diagnose_KB0010265_demo_syetem_20251120_181836 '
-ERROR: No job found for runbook 'Diagnose_KB0010265_demo_syetem_20251120_181836 '
-
-b50fffda-711c-4678-9471-4e7e03069019
-
-
+        out = get_runbook_output_by_job_id(job_id)
+        print("\n===== OUTPUT START =====\n")
+        print(out)
+        print("\n===== OUTPUT END =====\n")
+    except Exception as e:
+        print("ERROR:", e)

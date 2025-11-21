@@ -238,10 +238,13 @@ def create_new_runbook(runbook_name: str, system_name: str) -> None:
  # --------------------------------------------------------------------------
     # Step 4: EXECUTE RUNBOOK ON AZURE (NEWLY ADDED)
     # --------------------------------------------------------------------------
+        # --------------------------------------------------------------------------
+    # Step 4: EXECUTE RUNBOOK ON HYBRID WORKER GROUP
+    # --------------------------------------------------------------------------
     try:
         job_name = f"job_{new_runbook_name}_{timestamp}"
 
-        logger.info("Starting runbook execution: %s", new_runbook_name)
+        logger.info("Starting runbook execution on Hybrid Worker Group: %s", new_runbook_name)
 
         job = client.job.create(
             resource_group_name=config.RESOURCE_GROUP,
@@ -251,14 +254,19 @@ def create_new_runbook(runbook_name: str, system_name: str) -> None:
                 "properties": {
                     "runbook": {"name": new_runbook_name},
                     "parameters": {},  # no params passed
+                    "runOn": "Agentic_AI_POC_SCCM"   # <-- 🔥 IMPORTANT
                 }
             }
         )
 
-        logger.info("Runbook execution started successfully: Job ID = %s", job.id)
+        logger.info(
+            "Runbook execution started on Hybrid Worker Group. Job ID = %s",
+            job.id
+        )
 
     except Exception as exc:
-        logger.error("Failed to execute runbook '%s': %s", new_runbook_name, exc)
+        logger.error("Failed to execute runbook '%s' on Hybrid Worker Group: %s", new_runbook_name, exc)
+
 
 # ###############  FUNCTION: get_output_by_runbook_name ###############
 def get_runbook_output_by_job_id(job_id: str) -> str:
@@ -314,4 +322,5 @@ Traceback (most recent call last):
     raise Exception(f"Failed to fetch job output: {resp.text}")
 Exception: Failed to fetch job output: {"error":{"code":"NoRegisteredProviderFound","message":"No registered resource provider found for location 'swedencentral' and API version '2021-06-22' for type 'automationAccounts/jobs'. The supported api-versions are '2015-01-01-preview, 2015-10-31, 2017-05-15-preview, 2018-01-15, 2018-06-30, 2019-06-01, 2020-01-13-preview, 2022-08-08, 2023-05-15-preview, 2023-11-01, 2024-10-23'. The supported locations are 'japaneast, eastus2, westeurope, southafricanorth, ukwest, switzerlandnorth, brazilsoutheast, norwayeast, germanywestcentral, uaenorth, switzerlandwest, japanwest, uaecentral, australiacentral2, southindia, francesouth, norwaywest, westus3, koreasouth, swedencentral, southeastasia, southcentralus, northcentralus, eastasia, centralus, westus, australiacentral, australiaeast, koreacentral, eastus, westus2, brazilsouth, uksouth, westcentralus, northeurope, canadacentral, australiasoutheast, centralindia, francecentral, jioindiawest, jioindiacentral, qatarcentral, southafricawest, polandcentral, israelcentral, germanynorth, italynorth, canadaeast, spaincentral'."}}
 ERROR: Failed to fetch job output: {"error":{"code":"NoRegisteredProviderFound","message":"No registered resource provider found for location 'swedencentral' and API version '2021-06-22' for type 'automationAccounts/jobs'. The supported api-versions are '2015-01-01-preview, 2015-10-31, 2017-05-15-preview, 2018-01-15, 2018-06-30, 2019-06-01, 2020-01-13-preview, 2022-08-08, 2023-05-15-preview, 2023-11-01, 2024-10-23'. The supported locations are 'japaneast, eastus2, westeurope, southafricanorth, ukwest, switzerlandnorth, brazilsoutheast, norwayeast, germanywestcentral, uaenorth, switzerlandwest, japanwest, uaecentral, australiacentral2, southindia, francesouth, norwaywest, westus3, koreasouth, swedencentral, southeastasia, southcentralus, northcentralus, eastasia, centralus, westus, australiacentral, australiaeast, koreacentral, eastus, westus2, brazilsouth, uksouth, westcentralus, northeurope, canadacentral, australiasoutheast, centralindia, francecentral, jioindiawest, jioindiacentral, qatarcentral, southafricawest, polandcentral, israelcentral, germanynorth, italynorth, canadaeast, spaincentral'."}}
+
 

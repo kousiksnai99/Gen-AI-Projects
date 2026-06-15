@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>IT Support Multi-Agent Architecture</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #eef1f6; font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a2e; }
+  .page { padding: 36px 28px 48px 28px; }
+  h2 {
+    text-align: center; font-size: 21px; font-weight: 700;
+    letter-spacing: 0.4px; margin-bottom: 6px; color: #1a1a2e;
+  }
+  .subtitle {
+    text-align: center; font-size: 11.5px; color: #6b7280;
+    margin-bottom: 26px; letter-spacing: 0.3px;
+  }
+  .legend {
+    display: flex; gap: 16px; flex-wrap: wrap; justify-content: center;
+    font-size: 11px; margin-top: 26px; padding: 13px 18px;
+    background: #fff; border-radius: 10px; border: 1px solid #d1d9e6;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-weight: 500; color: #374151; }
+  .legend-dot { width: 13px; height: 13px; border-radius: 3px; border: 2px solid; flex-shrink: 0; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h2>🤖 IT Support Multi-Agent Architecture — Workflow Diagram</h2>
+  <div class="subtitle">End-to-End Intelligent IT Support Pipeline · Orchestrator-Led · ServiceNow Integrated</div>
+
+<!--
+  ═══════════════════════════════════════════════════════════════════
+  SPATIAL PLAN  (no column may share x-range with another)
+  ═══════════════════════════════════════════════════════════════════
+
+  SVG width  = 1700
+  SVG height = 1960
+
+  COLUMN CENTRES (cx) and their exclusive horizontal bands:
+  ─────────────────────────────────────────────────────────
+  Col A  Non-IT Decline          cx=110   band  20–210
+  Col B1 Outlook ≥85% flow       cx=360   band 220–510
+  Col B2 Outlook <85% Orch       cx=700   band 520–870  (just Orch box + fork)
+    Sub-B2L  ServiceNow parallel cx=630   band 520–760
+    Sub-B2R  Diagnosis parallel  cx=960   band 870–1110
+  Col C  Non-Outlook IT          cx=1380  band 1240–1540
+
+  Box geometry:
+    1-line box : h=40  text-y = box-top + 26
+    2-line box : h=54  text-y1 = box-top + 22, text-y2 = box-top + 40
+    Arrow gap  : 18px between bottom of box and top of next box
+
+  Branch spine:
+    3-way spine at y=370
+    A drop: x=110
+    B drop: x=560   (centre of Outlook issue block)
+    C drop: x=1380
+═══════════════════════════════════════════════════════════════════
+-->
+
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="1790"
+     font-family="'Segoe UI', Arial, sans-serif" font-size="11.5">
+
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="3.5" orient="auto">
+      <path d="M0,0 L0,7 L9,3.5 z" fill="#4a5568"/>
+    </marker>
+    <filter id="sh" x="-8%" y="-8%" width="116%" height="116%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#00000018"/>
+    </filter>
+  </defs>
+
+  <!-- ═══════════════════════════════════════
+       TOP SPINE: Chat Box → Orchestrator → Classifier
+       cx = 850 (horizontal centre of whole diagram)
+       ═══════════════════════════════════════ -->
+
+  <!-- Chat Box   top=28  h=46  bottom=74 -->
+  <rect x="720" y="28" width="260" height="46" rx="8"
+        fill="#ffffff" stroke="#94a3b8" stroke-width="2" filter="url(#sh)"/>
+  <text x="850" y="48" text-anchor="middle" font-size="13" font-weight="700" fill="#334155">💬 UI-Chat Window</text>
+  <text x="850" y="66" text-anchor="middle" font-size="10.5" fill="#64748b">Call Agent API</text>
+
+  <!-- arrow 74→100 -->
+  <line x1="850" y1="74" x2="850" y2="100" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Orchestrator (top)   top=102  h=68  bottom=170 -->
+  <rect x="620" y="102" width="460" height="68" rx="8"
+        fill="#f3e8f9" stroke="#7b2d8b" stroke-width="2" filter="url(#sh)"/>
+  <text x="850" y="124" text-anchor="middle" font-size="13" font-weight="700" fill="#5a1a6e">🧠 Orchestrator Agent</text>
+  <text x="850" y="142" text-anchor="middle" font-size="10.5" fill="#7b2d8b" font-style="italic">Receives user request · Greet user · Identify issue type</text>
+  <text x="850" y="160" text-anchor="middle" font-size="10.5" fill="#7b2d8b" font-style="italic">Classify: Non-IT / Non-Outlook IT / Outlook IT</text>
+
+  <!-- arrow 170→178, then horizontal spine 110→1380 -->
+  <line x1="850" y1="170" x2="850" y2="178" stroke="#4a5568" stroke-width="2"/>
+  <line x1="110" y1="178" x2="1380" y2="178" stroke="#4a5568" stroke-width="2"/>
+
+  <!-- Branch A drop cx=110 — NON-IT label -->
+  <line x1="110" y1="178" x2="110" y2="232" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- label badge: wide pill, solid red fill, white text, centred on cx=110 -->
+  <rect x="28" y="182" width="164" height="32" rx="10"
+        fill="#dc2626" stroke="#991b1b" stroke-width="1.5"/>
+  <text x="110" y="202" text-anchor="middle" font-size="12.5" font-weight="800"
+        fill="#ffffff" letter-spacing="0.3">🚫 Non-IT Issue</text>
+
+  <!-- Branch B drop cx=560 — OUTLOOK IT label -->
+  <line x1="560" y1="178" x2="560" y2="232" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="460" y="182" width="200" height="32" rx="10"
+        fill="#15803d" stroke="#14532d" stroke-width="1.5"/>
+  <text x="560" y="202" text-anchor="middle" font-size="12.5" font-weight="800"
+        fill="#ffffff" letter-spacing="0.3">📧 Outlook IT Issue</text>
+
+  <!-- Branch C drop cx=1380 — NON-OUTLOOK IT label -->
+  <line x1="1380" y1="178" x2="1380" y2="232" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="1256" y="182" width="248" height="32" rx="10"
+        fill="#1d4ed8" stroke="#1e3a8a" stroke-width="1.5"/>
+  <text x="1380" y="202" text-anchor="middle" font-size="12.5" font-weight="800"
+        fill="#ffffff" letter-spacing="0.3">🖥️ Non-Outlook IT Issue</text>
+
+  <!-- ═══════════════════════════════
+       COLUMN A — Non-IT Decline  cx=110
+       band x=20–200
+       ═══════════════════════════════ -->
+
+  <!-- Decline  top=238  h=68  bottom=306 -->
+  <rect x="20"  y="238" width="180" height="68" rx="8"
+        fill="#fef2f2" stroke="#ef4444" stroke-width="2" filter="url(#sh)"/>
+  <text x="110" y="262" text-anchor="middle" font-size="12" font-weight="700" fill="#7f1d1d">🚫 Decline to User</text>
+  <text x="110" y="282" text-anchor="middle" font-size="10" fill="#7f1d1d">"This is an IT support</text>
+  <text x="110" y="298" text-anchor="middle" font-size="10" fill="#7f1d1d">agent only."</text>
+
+  <!-- ═══════════════════════════════
+       COLUMN C — Non-Outlook IT  cx=1380
+       band x=1240–1540
+       ═══════════════════════════════ -->
+
+  <!-- Orchestrator Agent C  top=238  h=40  bottom=278 -->
+  <rect x="1252" y="238" width="256" height="40" rx="8"
+        fill="#f3e8f9" stroke="#7b2d8b" stroke-width="2" filter="url(#sh)"/>
+  <text x="1380" y="263" text-anchor="middle" font-size="12" font-weight="700" fill="#5a1a6e">🧠 Orchestrator Agent</text>
+
+  <!-- arrow 278→304 -->
+  <line x1="1380" y1="278" x2="1380" y2="304" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ServiceNow C  top=306  h=54  bottom=360 -->
+  <rect x="1252" y="306" width="256" height="54" rx="8"
+        fill="#fde8e8" stroke="#c0392b" stroke-width="2" filter="url(#sh)"/>
+  <text x="1380" y="328" text-anchor="middle" font-size="12" font-weight="700" fill="#7b1818">🎫 ServiceNow Agent</text>
+  <text x="1380" y="348" text-anchor="middle" font-size="10.5" fill="#7b1818">Create Ticket</text>
+
+  <!-- arrow 360→386 -->
+  <line x1="1380" y1="360" x2="1380" y2="386" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Inform User C  top=388  h=54  bottom=442 -->
+  <rect x="1252" y="388" width="256" height="54" rx="8"
+        fill="#f1f5f9" stroke="#64748b" stroke-width="2" filter="url(#sh)"/>
+  <text x="1380" y="410" text-anchor="middle" font-size="12" font-weight="700" fill="#334155">📢 Inform User</text>
+  <text x="1380" y="430" text-anchor="middle" font-size="10.5" fill="#334155">"Ticket raised. L1.5 will contact you."</text>
+
+  <!-- ═══════════════════════════════════════════════
+       COLUMN B SHARED HEAD — Outlook IT
+       cx=560 for the shared top boxes
+       ═══════════════════════════════════════════════ -->
+
+  <!-- Classification Agent (merged)  top=238  h=100  bottom=338  cx=560 -->
+  <rect x="374" y="238" width="372" height="100" rx="8"
+        fill="#e8f4fd" stroke="#0078d4" stroke-width="2" filter="url(#sh)"/>
+  <text x="560" y="260" text-anchor="middle" font-size="12" font-weight="700" fill="#0056a0">🔍 Classification Agent</text>
+  <text x="560" y="279" text-anchor="middle" font-size="10.5" fill="#0056a0">Ask Outlook related follow-up questions, summarize,</text>
+  <text x="560" y="297" text-anchor="middle" font-size="10.5" fill="#0056a0">choose best score KB article,</text>
+  <text x="560" y="315" text-anchor="middle" font-size="10.5" fill="#0056a0">check user guidance eligibility</text>
+
+  <!-- arrow 338→358 -->
+  <line x1="560" y1="338" x2="560" y2="358" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- KB Score Decision  top=360  h=40  bottom=400  cx=560 -->
+  <rect x="374" y="360" width="372" height="40" rx="8"
+        fill="#fff7ed" stroke="#e67e22" stroke-width="2" filter="url(#sh)"/>
+  <text x="560" y="385" text-anchor="middle" font-size="12.5" font-weight="700" fill="#9a3412">⬡  User Guidance</text>
+
+  <!-- KB split spine: from cx=560 bottom=400, drop to y=432
+       YES branch → cx=360    NO branch → cx=840  -->
+  <line x1="560" y1="400" x2="560" y2="432" stroke="#4a5568" stroke-width="2"/>
+  <line x1="360" y1="432" x2="840" y2="432" stroke="#4a5568" stroke-width="2"/>
+
+  <!-- YES label + drop  cx=360 -->
+  <rect x="302" y="410" width="52" height="22" rx="6" fill="#15803d" stroke="#14532d" stroke-width="1.5"/>
+  <text x="328" y="425" text-anchor="middle" font-size="10" fill="#fff" font-weight="800">YES</text>
+  <line x1="360" y1="432" x2="360" y2="458" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- NO label + drop  cx=840 -->
+  <rect x="796" y="410" width="48" height="22" rx="6" fill="#dc2626" stroke="#991b1b" stroke-width="1.5"/>
+  <text x="820" y="425" text-anchor="middle" font-size="10" fill="#fff" font-weight="800">NO</text>
+  <line x1="840" y1="432" x2="840" y2="458" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ═══════════════════════════════════════════════════
+       SUB-COL B1 — Outlook ≥85%   cx=360   x=230–490
+       ═══════════════════════════════════════════════════ -->
+
+  <!-- Show Troubleshoot Steps  top=460  h=40  bottom=500 -->
+  <rect x="230" y="460" width="260" height="40" rx="8"
+        fill="#dbeafe" stroke="#0078d4" stroke-width="2" filter="url(#sh)"/>
+  <text x="360" y="485" text-anchor="middle" font-size="12" font-weight="700" fill="#004a90">🪜 Show Troubleshoot Steps</text>
+
+  <!-- arrow 500→526 (into new Orchestrator Agent) -->
+  <line x1="360" y1="500" x2="360" y2="526" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Orchestrator Agent (Guidance YES — owns Issue Resolved? check)  top=528  h=40  bottom=568 -->
+  <rect x="230" y="528" width="260" height="40" rx="8"
+        fill="#f3e8f9" stroke="#7b2d8b" stroke-width="2" filter="url(#sh)"/>
+  <text x="360" y="553" text-anchor="middle" font-size="12" font-weight="700" fill="#5a1a6e">🧠 Orchestrator Agent</text>
+
+  <!-- arrow 568→594 (Orchestrator → Issue Resolved?) -->
+  <line x1="360" y1="568" x2="360" y2="594" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Issue Resolved? (YES branch)  top=596  h=40  bottom=636 -->
+  <rect x="230" y="596" width="260" height="40" rx="8"
+        fill="#fff7ed" stroke="#e67e22" stroke-width="2" filter="url(#sh)"/>
+  <text x="360" y="621" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">⬡  Issue Resolved?</text>
+
+  <!-- Spine: y=648, YES cx=270, NO cx=445 -->
+  <line x1="360" y1="636" x2="360" y2="648" stroke="#4a5568" stroke-width="2"/>
+  <line x1="270" y1="648" x2="445" y2="648" stroke="#4a5568" stroke-width="2"/>
+
+  <!-- YES drop cx=270 -->
+  <line x1="270" y1="648" x2="270" y2="674" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="236" y="650" width="36" height="18" rx="4" fill="#fff"/>
+  <text x="254" y="663" text-anchor="middle" font-size="10" fill="#166534" font-weight="700">YES</text>
+  <!-- align arrow into IssueClosed cx=210 -->
+  <line x1="270" y1="674" x2="210" y2="674" stroke="#4a5568" stroke-width="1.5"/>
+  <line x1="210" y1="674" x2="210" y2="676" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Issue Closed  top=676  h=40  bottom=716  cx=210  x=110–310 -->
+  <rect x="110" y="676" width="200" height="40" rx="8"
+        fill="#dcfce7" stroke="#22c55e" stroke-width="2" filter="url(#sh)"/>
+  <text x="210" y="701" text-anchor="middle" font-size="12" font-weight="700" fill="#166534">✅ Issue Closed</text>
+
+  <!-- NO drop cx=445 — directly into Raise ServiceNow Ticket (Orchestrator box removed) -->
+  <line x1="445" y1="648" x2="445" y2="674" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="453" y="650" width="30" height="18" rx="4" fill="#fff"/>
+  <text x="468" y="663" text-anchor="middle" font-size="10" fill="#dc2626" font-weight="700">NO</text>
+
+  <!-- Raise ServiceNow + raised for L1.5  top=676  h=54  bottom=730  cx=445  x=330–560 -->
+  <rect x="330" y="676" width="230" height="54" rx="8"
+        fill="#fde8e8" stroke="#c0392b" stroke-width="2" filter="url(#sh)"/>
+  <text x="445" y="698" text-anchor="middle" font-size="11.5" font-weight="700" fill="#7b1818">🎫 Raise ServiceNow Ticket</text>
+  <text x="445" y="718" text-anchor="middle" font-size="10.5" fill="#7b1818">Raised for L1.5</text>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       SUB-COL B2 — Outlook <85%   ORCHESTRATOR FLOW
+       Main Orch box cx=840   x=690–990
+       Parallel fork: ServiceNow cx=700   Diagnosis cx=1050
+       (these two sub-cols use cx that keep them apart and away
+        from ≥85% col right-edge=570 and Col-C left-edge=1240)
+       ═══════════════════════════════════════════════════════════ -->
+
+  <!-- Orchestrator (B2)  top=460  h=40  bottom=500  cx=840  x=690–990 -->
+  <rect x="690" y="460" width="300" height="40" rx="8"
+        fill="#f3e8f9" stroke="#7b2d8b" stroke-width="2" filter="url(#sh)"/>
+  <text x="840" y="485" text-anchor="middle" font-size="12" font-weight="700" fill="#5a1a6e">🧠 Orchestrator Agent</text>
+
+  <!-- Sequential arrow down from 840 bottom=500 -->
+  <line x1="840" y1="500" x2="840" y2="526" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ── SEQUENTIAL: ServiceNow Create Ticket  cx=840  top=528  h=54  bottom=582 ── -->
+  <rect x="692" y="528" width="296" height="54" rx="8"
+        fill="#fde8e8" stroke="#c0392b" stroke-width="2" filter="url(#sh)"/>
+  <text x="840" y="550" text-anchor="middle" font-size="12" font-weight="700" fill="#7b1818">🎫 ServiceNow Agent</text>
+  <text x="840" y="570" text-anchor="middle" font-size="10.5" fill="#7b1818">Create Ticket · Inform Orchestrator</text>
+
+  <!-- arrow 582→608 -->
+  <line x1="840" y1="582" x2="840" y2="608" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Ticket Created  cx=840  top=610  h=30  bottom=640 -->
+  <rect x="692" y="610" width="296" height="30" rx="6"
+        fill="#f3e8f9" stroke="#7b2d8b" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="840" y="629" text-anchor="middle" font-size="11" font-weight="700" fill="#5a1a6e">📨 Ticket Created</text>
+
+  <!-- arrow 640→666 -->
+  <line x1="840" y1="640" x2="840" y2="666" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Orchestrator → User  cx=840  top=668  h=54  bottom=722 -->
+  <rect x="692" y="668" width="296" height="54" rx="8"
+        fill="#f1f5f9" stroke="#64748b" stroke-width="2" filter="url(#sh)"/>
+  <text x="840" y="690" text-anchor="middle" font-size="12" font-weight="700" fill="#334155">📢 Orchestrator → User</text>
+  <text x="840" y="710" text-anchor="middle" font-size="10.5" fill="#334155">Ticket [INC000XXX] Created</text>
+
+  <!-- arrow 722→748 -->
+  <line x1="840" y1="722" x2="840" y2="748" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Diagnosis Agent  cx=840  top=750  h=40  bottom=790 -->
+  <rect x="692" y="750" width="296" height="40" rx="8"
+        fill="#dcfce7" stroke="#1a7a4a" stroke-width="2" filter="url(#sh)"/>
+  <text x="840" y="775" text-anchor="middle" font-size="12" font-weight="700" fill="#145235">🔬 Diagnosis Agent</text>
+
+  <!-- arrow 790→816 -->
+  <line x1="840" y1="790" x2="840" y2="816" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- RAG Search  cx=840  top=818  h=40  bottom=858 -->
+  <rect x="692" y="818" width="296" height="40" rx="8"
+        fill="#bbf7d0" stroke="#1a7a4a" stroke-width="2" filter="url(#sh)"/>
+  <text x="840" y="843" text-anchor="middle" font-size="12" fill="#145235">🗂️ RAG Search → Valid KB</text>
+
+  <!-- arrow 858→884 -->
+  <line x1="840" y1="858" x2="840" y2="884" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Run Diagnostic Script  cx=840  top=886  h=40  bottom=926 -->
+  <rect x="692" y="886" width="296" height="40" rx="8"
+        fill="#bbf7d0" stroke="#1a7a4a" stroke-width="2" filter="url(#sh)"/>
+  <text x="840" y="911" text-anchor="middle" font-size="12" fill="#145235">⚙️ Run Diagnostic Script</text>
+
+  <!-- arrow 926→952 -->
+  <line x1="840" y1="926" x2="840" y2="952" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Response to Orchestrator  cx=840  top=954  h=54  bottom=1008 -->
+  <rect x="692" y="954" width="296" height="54" rx="8"
+        fill="#f3e8f9" stroke="#7b2d8b" stroke-width="2" filter="url(#sh)"/>
+  <text x="840" y="976" text-anchor="middle" font-size="12" font-weight="700" fill="#5a1a6e">↩ Response to</text>
+  <text x="840" y="996" text-anchor="middle" font-size="10.5" fill="#5a1a6e">Orchestrator Agent</text>
+
+  <!-- arrow 1008→1034 -->
+  <line x1="840" y1="1008" x2="840" y2="1034" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ── ORCHESTRATOR SUMMARIZE  cx=840  top=1036  h=54  bottom=1090 ── -->
+  <rect x="692" y="1036" width="296" height="54" rx="8"
+        fill="#f3e8f9" stroke="#7b2d8b" stroke-width="2" filter="url(#sh)"/>
+  <text x="840" y="1058" text-anchor="middle" font-size="12" font-weight="700" fill="#5a1a6e">🧠 Orchestrator</text>
+  <text x="840" y="1078" text-anchor="middle" font-size="10.5" fill="#5a1a6e">Summarize Diagnostic Report → User</text>
+
+  <!-- arrow 1090→1116 -->
+  <line x1="840" y1="1090" x2="840" y2="1116" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- User Consent Decision  cx=840  top=1118  h=54  bottom=1172 -->
+  <rect x="618" y="1118" width="444" height="54" rx="8"
+        fill="#fff7ed" stroke="#e67e22" stroke-width="2" filter="url(#sh)"/>
+  <text x="840" y="1140" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">⬡ Orchestrator Asks User:</text>
+  <text x="840" y="1160" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">Proceed with Troubleshooting?</text>
+
+  <!-- Consent spine: y=1202, YES cx=745, NO cx=1015 -->
+  <line x1="840" y1="1172" x2="840" y2="1202" stroke="#4a5568" stroke-width="2"/>
+  <line x1="745" y1="1202" x2="1015" y2="1202" stroke="#4a5568" stroke-width="2"/>
+
+  <!-- YES label + drop cx=745 -->
+  <rect x="701" y="1182" width="46" height="22" rx="6" fill="#15803d" stroke="#14532d" stroke-width="1.5"/>
+  <text x="724" y="1197" text-anchor="middle" font-size="10.5" fill="#fff" font-weight="800">YES</text>
+  <line x1="745" y1="1202" x2="745" y2="1228" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- NO label + drop cx=1015 -->
+  <rect x="992" y="1182" width="46" height="22" rx="6" fill="#dc2626" stroke="#991b1b" stroke-width="1.5"/>
+  <text x="1015" y="1197" text-anchor="middle" font-size="10.5" fill="#fff" font-weight="800">NO</text>
+  <line x1="1015" y1="1202" x2="1015" y2="1228" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Troubleshoot Agent  top=1230  h=54  bottom=1284 -->
+  <rect x="617" y="1230" width="256" height="54" rx="8"
+        fill="#ffedd5" stroke="#d35400" stroke-width="2" filter="url(#sh)"/>
+  <text x="745" y="1250" text-anchor="middle" font-size="12" font-weight="700" fill="#7c2d12">🛠️ Troubleshoot Agent</text>
+  <text x="745" y="1270" text-anchor="middle" font-size="10.5" fill="#7c2d12">Run Script</text>
+
+  <!-- arrow 1284→1310 -->
+  <line x1="745" y1="1284" x2="745" y2="1310" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Result to Orchestrator  top=1312  h=40  bottom=1352 -->
+  <rect x="617" y="1312" width="256" height="40" rx="8"
+        fill="#f3e8f9" stroke="#7b2d8b" stroke-width="2" filter="url(#sh)"/>
+  <text x="745" y="1337" text-anchor="middle" font-size="12" font-weight="700" fill="#5a1a6e">🧠 Result → Orchestrator</text>
+
+  <!-- arrow 1352→1378 -->
+  <line x1="745" y1="1352" x2="745" y2="1378" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Orchestrator Summarize Issue  top=1380  h=54  bottom=1434 -->
+  <rect x="617" y="1380" width="256" height="54" rx="8"
+        fill="#f3e8f9" stroke="#7b2d8b" stroke-width="2" filter="url(#sh)"/>
+  <text x="745" y="1402" text-anchor="middle" font-size="12" font-weight="700" fill="#5a1a6e">📋 Orchestrator</text>
+  <text x="745" y="1422" text-anchor="middle" font-size="10.5" fill="#5a1a6e">Summarize Issue → User</text>
+
+  <!-- arrow 1434→1460 -->
+  <line x1="745" y1="1434" x2="745" y2="1460" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Issue Resolved?  top=1462  h=40  bottom=1502 -->
+  <rect x="617" y="1462" width="256" height="40" rx="8"
+        fill="#fff7ed" stroke="#e67e22" stroke-width="2" filter="url(#sh)"/>
+  <text x="745" y="1487" text-anchor="middle" font-size="12" font-weight="700" fill="#9a3412">⬡  Issue Resolved?</text>
+
+  <!-- spine y=1532, YES cx=665, NO cx=825 -->
+  <line x1="745" y1="1502" x2="745" y2="1532" stroke="#4a5568" stroke-width="2"/>
+  <line x1="665" y1="1532" x2="825" y2="1532" stroke="#4a5568" stroke-width="2"/>
+
+  <!-- YES label + drop cx=665 -->
+  <rect x="621" y="1512" width="46" height="22" rx="6" fill="#15803d" stroke="#14532d" stroke-width="1.5"/>
+  <text x="644" y="1527" text-anchor="middle" font-size="10.5" fill="#fff" font-weight="800">YES</text>
+  <line x1="665" y1="1532" x2="665" y2="1558" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ServiceNow Update + Close  cx=665  x=537–793  top=1560  h=54  bottom=1614 -->
+  <rect x="537" y="1560" width="256" height="54" rx="8"
+        fill="#fde8e8" stroke="#c0392b" stroke-width="2" filter="url(#sh)"/>
+  <text x="665" y="1582" text-anchor="middle" font-size="12" font-weight="700" fill="#7b1818">🎫 ServiceNow Agent</text>
+  <text x="665" y="1602" text-anchor="middle" font-size="10.5" fill="#7b1818">Update Diagnosis &amp; Troubleshoot</text>
+
+  <!-- arrow 1614→1640 -->
+  <line x1="665" y1="1614" x2="665" y2="1640" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Resolve Ticket  cx=665  top=1642  h=40  bottom=1682 -->
+  <rect x="537" y="1642" width="256" height="40" rx="8"
+        fill="#dcfce7" stroke="#22c55e" stroke-width="2" filter="url(#sh)"/>
+  <text x="665" y="1667" text-anchor="middle" font-size="12" font-weight="700" fill="#166534">✅ Resolve Ticket</text>
+
+  <!-- NO label + drop → shifted cx=935 -->
+  <line x1="825" y1="1532" x2="825" y2="1548" stroke="#4a5568" stroke-width="2"/>
+  <line x1="825" y1="1548" x2="935" y2="1548" stroke="#4a5568" stroke-width="2"/>
+  <rect x="823" y="1512" width="46" height="22" rx="6" fill="#dc2626" stroke="#991b1b" stroke-width="1.5"/>
+  <text x="846" y="1527" text-anchor="middle" font-size="10.5" fill="#fff" font-weight="800">NO</text>
+  <line x1="935" y1="1548" x2="935" y2="1558" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ServiceNow Update Findings  cx=935  x=807–1063  top=1560  h=54  bottom=1614 -->
+  <rect x="807" y="1560" width="256" height="54" rx="8"
+        fill="#fde8e8" stroke="#c0392b" stroke-width="2" filter="url(#sh)"/>
+  <text x="935" y="1582" text-anchor="middle" font-size="12" font-weight="700" fill="#7b1818">🎫 ServiceNow Agent</text>
+  <text x="935" y="1602" text-anchor="middle" font-size="10.5" fill="#7b1818">Update Findings</text>
+
+  <!-- arrow 1614→1640 -->
+  <line x1="935" y1="1614" x2="935" y2="1640" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Keep Ticket Open  cx=935  top=1642  h=40  bottom=1682 -->
+  <rect x="807" y="1642" width="256" height="40" rx="8"
+        fill="#fef2f2" stroke="#ef4444" stroke-width="2" filter="url(#sh)"/>
+  <text x="935" y="1667" text-anchor="middle" font-size="12" font-weight="700" fill="#7b1818">🔴 Keep Ticket Open</text>
+
+  <!-- ── NO CONSENT PATH  cx=1015  x=887–1143 ── -->
+
+  <!-- ServiceNow Update Diagnosis  top=1230  h=54  bottom=1284 -->
+  <rect x="887" y="1230" width="256" height="54" rx="8"
+        fill="#fde8e8" stroke="#c0392b" stroke-width="2" filter="url(#sh)"/>
+  <text x="1015" y="1252" text-anchor="middle" font-size="12" font-weight="700" fill="#7b1818">🎫 ServiceNow Agent</text>
+  <text x="1015" y="1272" text-anchor="middle" font-size="10.5" fill="#7b1818">Update Diagnosis in Ticket</text>
+
+  <!-- arrow 1284→1310 -->
+  <line x1="1015" y1="1284" x2="1015" y2="1310" stroke="#4a5568" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Keep Ticket Open  top=1312  h=40  bottom=1352 -->
+  <rect x="887" y="1312" width="256" height="40" rx="8"
+        fill="#fef2f2" stroke="#ef4444" stroke-width="2" filter="url(#sh)"/>
+  <text x="1015" y="1337" text-anchor="middle" font-size="12" font-weight="700" fill="#7b1818">🔴 Keep Ticket Open</text>
+
+  <!-- ═══════════════════════════════
+       COLUMN / SECTION HEADER BANNERS
+       drawn LAST so they sit on top
+       ═══════════════════════════════ -->
+
+  <!-- Col A header -->
+  <rect x="20" y="190" width="180" height="20" rx="5"
+        fill="#fef2f2" stroke="#ef4444" stroke-width="1.2"/>
+  <text x="110" y="204" text-anchor="middle" font-size="9.5" font-weight="700"
+        fill="#7f1d1d" letter-spacing="0.4">NON-IT FLOW</text>
+
+  <!-- Col B header (full width of Outlook) -->
+  <rect x="230" y="190" width="690" height="20" rx="5"
+        fill="#f0fdf4" stroke="#1a7a4a" stroke-width="1.2"/>
+  <text x="575" y="204" text-anchor="middle" font-size="9.5" font-weight="700"
+        fill="#145235" letter-spacing="0.4">OUTLOOK IT FLOW</text>
+
+  <!-- Col C header -->
+  <rect x="1252" y="190" width="256" height="20" rx="5"
+        fill="#eff6ff" stroke="#0078d4" stroke-width="1.2"/>
+  <text x="1380" y="204" text-anchor="middle" font-size="9.5" font-weight="700"
+        fill="#0056a0" letter-spacing="0.4">NON-OUTLOOK IT FLOW</text>
+
+  <!-- Sub-header YES -->
+  <rect x="230" y="428" width="260" height="18" rx="4"
+        fill="#dbeafe" stroke="#0078d4" stroke-width="1"/>
+  <text x="360" y="441" text-anchor="middle" font-size="9" font-weight="700"
+        fill="#004a90">Guidance YES</text>
+
+  <!-- Sub-header NO -->
+  <rect x="690" y="428" width="300" height="18" rx="4"
+        fill="#f3e8f9" stroke="#7b2d8b" stroke-width="1"/>
+  <text x="840" y="441" text-anchor="middle" font-size="9" font-weight="700"
+        fill="#5a1a6e">Guidance NO — ORCHESTRATOR FLOW</text>
+
+</svg>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="border-color:#94a3b8;background:#fff;"></div> UI-Chat Window / User</div>
+    <div class="legend-item"><div class="legend-dot" style="border-color:#7b2d8b;background:#f3e8f9;"></div> Orchestrator Agent</div>
+    <div class="legend-item"><div class="legend-dot" style="border-color:#0078d4;background:#e8f4fd;"></div> Classification / KB Agent</div>
+    <div class="legend-item"><div class="legend-dot" style="border-color:#c0392b;background:#fde8e8;"></div> ServiceNow Agent</div>
+    <div class="legend-item"><div class="legend-dot" style="border-color:#1a7a4a;background:#dcfce7;"></div> Diagnosis Agent / RAG</div>
+    <div class="legend-item"><div class="legend-dot" style="border-color:#d35400;background:#ffedd5;"></div> Troubleshooting Agent</div>
+    <div class="legend-item"><div class="legend-dot" style="border-color:#e67e22;background:#fff7ed;"></div> Decision Point</div>
+    <div class="legend-item"><div class="legend-dot" style="border-color:#22c55e;background:#dcfce7;"></div> Resolved / Closed</div>
+    <div class="legend-item"><div class="legend-dot" style="border-color:#ef4444;background:#fef2f2;"></div> Open / Escalate</div>
+  
+  </div>
+
+</div>
+</body>
+</html>

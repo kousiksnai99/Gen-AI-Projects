@@ -1,0 +1,212 @@
+kind: workflow
+trigger:
+  kind: OnConversationStart
+  id: trigger_wf
+  actions:
+    - kind: InvokeAzureAgent
+      id: node-1781403695584
+      agent:
+        name: orchestrator-agent
+      conversationId: =System.ConversationId
+      input: {}
+      output:
+        autoSend: false
+        responseObject: Local.response
+    - kind: ConditionGroup
+      conditions:
+        - condition: =Local.response.issue_type = "non_it"
+          actions:
+            - kind: SendActivity
+              activity: |-
+                This is an IT support
+                agent only.
+              id: node-1781404865340
+          id: if-node-1781404138057-1vv0oq82
+      id: node-1781404138057
+      elseActions:
+        - kind: ConditionGroup
+          conditions:
+            - condition: =Local.response.issue_type = "non_outlook_it"
+              actions:
+                - kind: InvokeAzureAgent
+                  id: node-1781597119014
+                  agent:
+                    name: ServiceNowAgent
+                  conversationId: =System.ConversationId
+                  input:
+                    messages: ""
+                  output:
+                    autoSend: true
+                - kind: EndConversation
+                  id: node-1781419555366
+              id: if-node-1781404342989-4wpz93nt
+          id: node-1781404342989
+          elseActions:
+            - kind: InvokeAzureAgent
+              id: node-1781407800558
+              agent:
+                name: Test-agent-1
+              conversationId: =System.ConversationId
+              output:
+                autoSend: false
+                responseObject: Local.outlook
+              input:
+                messages: =System.LastMessage.Text
+            - kind: SendActivity
+              id: show_message
+              activity: |
+                {Local.outlook.message}     
+            - kind: ConditionGroup
+              id: loop_check
+              conditions:
+                - condition: =Not(Local.outlook.handoff)
+                  id: keep_going
+                  actions:
+                    - kind: Question
+                      id: await_user
+                      variable: Local.userTurn
+                      entity: StringPrebuiltEntity
+                      prompt: ""
+                    - kind: GotoAction
+                      id: loop_back
+                      actionId: node-1781407800558
+              elseActions: []
+            - kind: ConditionGroup
+              conditions:
+                - condition: =Local.outlook.guidance_troubleshoot
+                  actions:
+                    - kind: Question
+                      variable: Local.resolved
+                      id: node-1781488564305
+                      entity: StringPrebuiltEntity
+                      skipQuestionMode: SkipOnFirstExecutionIfVariableHasValue
+                      prompt: Did these steps resolve your issue?
+                    - kind: ConditionGroup
+                      conditions:
+                        - condition: ="yes" in Local.resolved
+                          actions: []
+                          id: if-node-1781488579868-ggult7ix
+                      id: node-1781488579868
+                      elseActions:
+                        - kind: InvokeAzureAgent
+                          id: node-1781597643597
+                          agent:
+                            name: ServiceNowAgent
+                          conversationId: =System.ConversationId
+                          input:
+                            messages: ""
+                          output:
+                            autoSend: true
+                        - kind: EndConversation
+                          id: node-1781488651770
+                    - kind: SendActivity
+                      activity: Glad it worked
+                      id: node-1781421726130
+                    - kind: EndConversation
+                      id: node-1781421964910
+                  id: if-node-1781421700169-8e67qnkt
+              id: node-1781421700169
+              elseActions:
+                - kind: InvokeAzureAgent
+                  id: node-1781597668329
+                  agent:
+                    name: ServiceNowAgent
+                  conversationId: =System.ConversationId
+                  input:
+                    messages: ="action=create_incident | issue_type=outlook_it | details=" & Local.outlook.message
+                  output:
+                    autoSend: true
+                - kind: SendActivity
+                  activity: Diagnosis Flow started
+                  id: node-1781609872219
+                - kind: InvokeAzureAgent
+                  id: node-1781609928584
+                  agent:
+                    name: Diagnostics-Agent
+                  conversationId: =System.ConversationId
+                  input:
+                    messages: =Local.outlook
+                  output:
+                    autoSend: true
+                - kind: Question
+                  variable: Local.flag
+                  id: node-1781489510063
+                  entity: StringPrebuiltEntity
+                  skipQuestionMode: SkipOnFirstExecutionIfVariableHasValue
+                  prompt: Proceed with troubleshooting?
+                - kind: ConditionGroup
+                  conditions:
+                    - condition: ="yes" in Local.flag
+                      actions:
+                        - kind: SendActivity
+                          activity: Troubleshoot started
+                          id: node-1781613410033
+                        - kind: SetVariable
+                          id: node-1781688059053
+                          variable: Local.outlook
+                          value: =Local.outlook
+                        - kind: InvokeAzureAgent
+                          id: node-1781610098056
+                          agent:
+                            name: troubleshooting-Agent
+                          conversationId: =System.ConversationId
+                          input:
+                            messages: =Local.outlook.message
+                          output:
+                            autoSend: true
+                        - kind: Question
+                          variable: Local.final_response
+                          id: node-1781489684785
+                          entity: StringPrebuiltEntity
+                          skipQuestionMode: SkipOnFirstExecutionIfVariableHasValue
+                          prompt: Issue Resolved?
+                        - kind: ConditionGroup
+                          conditions:
+                            - condition: ="yes" in Local.final_response
+                              actions:
+                                - kind: InvokeAzureAgent
+                                  id: node-1781597752712
+                                  agent:
+                                    name: ServiceNowAgent
+                                  conversationId: =System.ConversationId
+                                  input:
+                                    messages: ="action=resolve"
+                                  output:
+                                    autoSend: true
+                                - kind: EndConversation
+                                  id: node-1781489758041
+                              id: if-node-1781489718572-kaojskwf
+                          id: node-1781489718572
+                          elseActions:
+                            - kind: InvokeAzureAgent
+                              id: node-1781597784208
+                              agent:
+                                name: ServiceNowAgent
+                              conversationId: =System.ConversationId
+                              input:
+                                messages: ""
+                              output:
+                                autoSend: true
+                            - kind: EndConversation
+                              id: node-1781489823325
+                      id: if-node-1781489557894-vnzc11iy
+                  id: node-1781489557894
+                  elseActions:
+                    - kind: InvokeAzureAgent
+                      id: node-1781597723711
+                      agent:
+                        name: ServiceNowAgent
+                      conversationId: =System.ConversationId
+                      input:
+                        messages: ""
+                      output:
+                        autoSend: true
+                - kind: EndConversation
+                  id: node-1781421969143
+    - kind: EndConversation
+      id: node-1781406611155
+id: ""
+name: Test-workflow
+description: ""
+
+ 

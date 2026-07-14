@@ -1,0 +1,119 @@
+Table of Contents 
+
+ 
+
+ 
+
+ 
+
+DSET Standartization AI 
+
+ 
+
+Make sure the solution architecture of the project is clear and documented 
+
+Make sure you have a Jira ticket on the project 
+
+Verify Your code is connected\Saved to the Azure Dev Ops Repository 
+
+https://dev.azure.com/ 
+
+ 
+
+Make sure that you work with the same repo name on Dev/Test & Prod environments. 
+ 
+For example: MMIT on Dev, MMIT_CDW on Prod. Please make sure that same repo is used across the environment. 
+
+ 
+
+code file have clear naming convention.  
+
+Ex. PROJECT NAME – DATA Ingestion\Model\Configuration 
+
+Each code file has a README section at the beginning. 
+
+Ex.  
+
+######################## 
+
+## Project name : 
+
+## Business owner , Team : 
+
+## Notebook Author , Team: 
+
+##Date: 
+
+##Puprose of Notebook: 
+
+######################## 
+
+If there are connection between code files , this should be mentioned in the file's top readme section 
+
+Comment on each Function , each section. As much comments as possible 
+
+If there are more than two envs: dev , prod . you must have the env as parameter for the ci\cd pipeline. 
+ 
+Make sure that you are not hardcoding anything which changes based on the environments,  
+
+Variables with clear naming convention (no x,y,z,i) 
+
+Function names, Data Frames names with clear naming convention (no df , func) 
+
+There should be a data validation part. Make sure no drifting in column names, column values. 
+
+All code sections will be unified in the code in one place e.g. imports of packages in one section . (imports , functions , declarations , settings variables ) 
+
+Each section will be separated from the other section in a clear manner with a comment statement . 
+
+Example:  ###############  IMPORT PACKAGES  ############### 
+
+ 
+
+Avoid hardcoding of secrets or passwords in the code files and access them through key vault. 
+
+print statements within the code should be send to a log or a file  
+
+Make sure that the next environments are prepared in the same configuration 
+
+Use managed identity or Service Principle to connect to other systems if needed.  
+
+The code will be reviewed by external person who has coding skills and is not related to the development of the project. 
+
+When creating a code , write it in the most general reusable way possible , for other project's usage 
+
+All Promotions between environments will be done via ci\cd automation. 
+
+Part of the flow of the ci\cd , is an approval step, by people who are external to the promoted project. 
+
+All promotions will be documented and deployed by certified people  
+
+All packages in the code must be downloaded from Teva secured package repository. 
+
+Logging as much as possible 
+
+Send events to EventHub to monitor the execution of the notebook and identify the failure of the code in the code files. 
+
+Alerts in case there is a failure in the web application 
+
+Cost for each application and model is clear 
+
+Authentication in the webapp will be through ENTRAID 
+
+All permissions in the webapp will be conducted with AD Groups. 
+
+All entities in the AD Groups will be requested through IDM 
+
+Every component that has a description – must add the description of the project. 
+
+Promotions should be at least two weeks notice before.  
+
+ 
+
+ 
+
+ 
+
+ 
+
+ 

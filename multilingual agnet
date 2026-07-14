@@ -503,3 +503,22 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             },
             status= 500
         )
+
+
+{
+    "scriptFile": "__init__.py",
+    "bindings": [
+        {
+            "authLevel": "function",
+            "type": "httpTrigger",
+            "direction": "in",
+            "name": "req",
+            "methods":["post","get"]
+        },
+        {
+            "type": "http",
+            "direction": "out",
+            "name": "$return"
+        }
+    ]
+}

@@ -48,3 +48,458 @@ STYLE
 - Action-oriented
 add the abovelines whereever its needed
 prompt is correct but the thing is jab v hindi mein kr rha hai sometime hindi mein reply aa rha hai
+|
+
+Project endpoint:https://aifoundry-rjteh-ais-swce-poc.services.ai.azure.com/api/projects/aifp-uqqnf-ais-swce-poc
+azure openapi: https://aifoundry-rjteh-ais-swce-poc.openai.azure.com/openai/v1
+api key: G3T2HOKaVUTwDmDkV0OaEOrlsjO90eJPfaWZErYpODlIvzuOhEMoJQQJ99BJACfhMk5XJ3w3AAAAACOG8gdK
+
+
+##################################################################################### 
+## Project name : Agentic AI POC                                                    #
+## Business owner , Team : Data and AIA                                             #
+## Notebook Author , Team: POC Team                                                 #
+## Date: 17th Nov 2025                                                              #
+## Puprose of Notebook:                                                             #
+##  HTTP-triggered Azure Function that:                                             #
+##      1. Recieves and issue description from a caller [Service Desk/App].         #
+##      2. Uses Azure AI Foundry diagnostic agent to resolve the issue to an        #
+##         Azure Automation Runbook.                                                #
+##      3. Clones the runbook with additional metadata [eg. target machine] and     #
+##         publish it for execution.                                                #
+## Code 
+#####################################################################################
+
+# # Load all the libraries
+import json
+import logging
+import os
+import uuid
+from datetime import datetime, timezone
+import time
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple
+
+import azure.functions as func
+from azure.eventhub import EventHubProducerClient, EventData
+from pydantic import BaseModel, ValidationError
+
+# Auth / SDKs
+from azure.identity import DefaultAzureCredential
+from azure.mgmt.automation import AutomationClient
+
+
+# Optional: Azure AI Projects
+from azure.ai.projects import AIProjectClient
+from azure.ai.agents.models import ListSortOrder
+import requests
+
+# Access the storage account
+from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
+
+from dotenv import load_dotenv
+load_dotenv()
+
+
+# Akeyless [Fetch Secrets]
+import akeyless
+from akeyless_cloud_id import CloudId
+
+
+#=============================Logging Setup========================================================
+# Azure function configures root logger but we are ensuring the level.
+logging.getLogger().setLevel(logging.INFO)
+
+#=============================Data Class Module==========================================================
+@dataclass
+class AutomationConfig:
+    """Configuration required for Azure Automation interactions."""
+    subscription_id:str
+    resource_group: str
+    automation_account: str
+    location: str
+
+@dataclass
+class FoundryConfig:
+    """Configuration required for Azure AI Foundry interactions."""
+    endpoint:str
+    diagnostic_agent_id: str
+    troubleshoot_agent_id: str
+    user_readable_agent: str
+    deployment: str
+    api_version: str
+
+@dataclass
+class AppConfig:
+    """Configuration object for the function."""
+    environment:str
+    automation: AutomationConfig
+    foundry: FoundryConfig
+
+#=========================================Helpers: Setting Akeyless===========================================
+def read_akeyless_dicts():
+    """ FETCH ID AND SECRET FROM AKEYLESS DICTIONARY
+        - AGENT VARIABLES
+        - AUTOMATION VARIABLES
+        All the secrets are stored in akeyless
+    """
+    logging.info("Reading Condiguration dictionaries from Akeyless.")
+    
+    Automation_Variable= {
+        "AZ_SUBSCRIPTION_ID": "4c85c528-9da9-48ac-a5c3-41bd351728eb",
+        "AZ_RESOURCE_GROUP": "rg-fbntf-ais-swce-poc",
+        "AZ_AUTOMATION_ACCOUNT": "aa-mbfin-ais-swce-poc",
+        "LOCATION":"Sweden Central"
+        }
+    Foundry_Variable={
+        "Endpoint": "https://aifoundry-rjteh-ais-swce-poc.services.ai.azure.com/api/projects/aifp-uqqnf-ais-swce-poc",
+        "Model_Name": "gpt-5-mini",
+        "Deployment": "ITOA-Service_Desk-Agentic_AI_POC-gpt-5-mini",
+        "API_Version": "2024-12-01-preview",
+        "DIAGNOSTIC_Agent_ID": "asst_MxWLoHuCHSwnPxyZfzUe2EOb",
+        "TROUBLESHOOT_Agent_ID": "asst_fP3eyPFbOQGjFvH7m909Kdi6",
+        "USER_READABLE_AGENT_ID":"asst_eMl2MCUq0R2ixNWstznf9G3u"}
+    logging.info("Akeyless dictionaries loaded successfully.")
+    return Foundry_Variable, Automation_Variable
+
+#=========================================Helpers: Loading Configuration===========================================
+def load_config_from_akeyless() ->Tuple[AppConfig, Dict[str, Any], Dict[str, Any]]:
+    """
+    Build AppConfig from Akeyless dictionaries and environment.
+    """
+    app_env= "dev"
+    foundry_dict, automation_dict= read_akeyless_dicts()
+    automation_cfg =AutomationConfig(
+        subscription_id= automation_dict['AZ_SUBSCRIPTION_ID'],
+        resource_group = automation_dict['AZ_RESOURCE_GROUP'],
+        automation_account = automation_dict['AZ_AUTOMATION_ACCOUNT'],
+        location = automation_dict['LOCATION']
+        )
+    foundry_cfg = FoundryConfig(
+        endpoint= foundry_dict['Endpoint'],
+        diagnostic_agent_id= foundry_dict['DIAGNOSTIC_Agent_ID'],
+        troubleshoot_agent_id= foundry_dict['TROUBLESHOOT_Agent_ID'],
+        user_readable_agent= foundry_dict['USER_READABLE_AGENT_ID'],
+        deployment= foundry_dict['Deployment'],
+        api_version= foundry_dict['API_Version']
+        )
+    config = AppConfig(environment= app_env, automation = automation_cfg, foundry = foundry_cfg)
+    return config, foundry_dict, automation_dict
+
+#==============================================Utilities========================================================
+
+def json_response(payload: Dict[str, Any], status: int =200) ->func.HttpResponse:
+    """Returns a JSON-formatted HTTP response within consistent headers."""
+    return func.HttpResponse(
+        body = json.dumps(payload),
+        status_code= status,
+        mimetype ="application/json",
+        )
+
+def get_default_credential() ->DefaultAzureCredential:
+    """ Create a Default Azure Credentialinstance suitable for functionapps."""
+    return DefaultAzureCredential(
+        exclude_interactive_browser_credential=True,
+        exclude_visual_studio_code_credential=True,
+        exclude_shared_token_cache_credential=True,
+        exclude_powershell_credential=True)
+
+#============================================Event Hub Logging==========================================
+class EventHubLogger:
+    """
+    Simple wrapper for sending JSON events to Azure Event Hub using AAD
+    authentication. No connection string is user.
+    """
+    def __init__(self, automation_dict: Dict[str, Any], credential: DefaultAzureCredential):
+        namespace =""
+        name=""
+
+        if not namespace or not name:
+            logging.warning(
+                "Event Hub namespace/name not configured. Event will not be sent."
+                )
+            self.producer: Optional[EventHubProducerClient] = None
+            return
+        
+        try:
+            self.producer= EventHubProducerClient(
+                fully_qualified_namespace = namespace,
+                eventhub_name = name,
+                credential= credential
+            )
+            logging.info("Event Hub Logger initialised for hub '%s'.", name)
+        except Exception:
+            logging.exception("Failed to initialise Eventhub producer client.")
+            self.producer=None
+    
+    def send_event(self, event: Dict[str, Any]) -> None:
+        """
+        Send a single JSON event to Event Hub. Failure is looged but doesn't
+        break the main flow.
+        """
+        if not self.producer:
+            return
+        
+        try:
+            paylod = json.dumps(event)
+            event_data =EventData(payload)
+            with self.producer:
+                batch = self.producer.create_batch()
+                batch.add(event_data)
+                self.producer.send_batch(batch)
+            logging.info("Event sent to Event Hub: %s", event.get("event_type"))
+        except Exception:
+            logging.exception("Failed to send event to eventhub.")
+
+#==============================================AZURE AUTOMATION===================================
+class AzureautomationService:
+    """Wrapper around azure automation operations (Runbook CRUD, REST content)."""
+
+    def __init__(self, config: AutomationConfig, credential: DefaultAzureCredential):
+        self.config=config
+        self.credential=credential
+        self.client = AutomationClient(credential, config.subscription_id)
+
+    def get_rest_token(self) -> str:
+        """Acquire a token for Azure Resource Manager using managed identity."""
+        token = self.credential.get_token("https://management.azure.com/.default").token
+        return token
+
+    def fetch_jobs_from_azure_automation(self, session_id) -> Optional[str]:
+        """
+        Fetch runbook content directly from Azure via REST API.
+        Returns the runbook powershell script as string or None if not found.
+        """
+        token=self.get_rest_token()
+        url = (
+            f"https://management.azure.com/subscriptions/{self.config.subscription_id}"
+            f"/resourceGroups/{self.config.resource_group}"
+            f"/providers/Microsoft.Automation/automationAccounts/{self.config.automation_account}"
+            f"/jobs?api-version=2023-11-01"
+        )
+   
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/octet-stream"
+            }
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            items = data.get("value", [])
+            sorted_items=sorted(items, key=lambda x: x.get("properties",{}).get("creationTime",""), reverse=True)
+            latest= sorted_items[:50]
+            results = [] 
+            for item in latest:
+                props = item.get("properties",{})
+                job_id= props.get("jobId")
+                runbook= props.get("runbook",{}) if props else{}
+                current_time_utc=datetime.utcnow().isoformat() +"+00:00"
+                job_time=props.get('creationTime')
+                target_machine = runbook['name'].split('_')[2]
+                time_difference=datetime.fromisoformat(current_time_utc) - datetime.fromisoformat(job_time)
+                if session_id=='_'.join(runbook['name'].split('_')[3:]) and runbook['name'].split('_')[0]=='Diagnose':
+                    return runbook['name'], target_machine, props.get("status"), job_id
+            return None,None,"Job not started", None
+
+        return None,None,"Automation API is not working", None
+
+
+
+    def fetch_output_from_azure_automation(self,job_name: str, job_id: str) -> str:
+        """
+        Fetch Azure Automation runbook output using JOB ID.
+        Works for all regions including Sweden Central.
+        """
+
+        token=self.get_rest_token()
+        output_url = (
+            f"https://management.azure.com/subscriptions/{self.config.subscription_id}"
+            f"/resourceGroups/{self.config.resource_group}"
+            f"/providers/Microsoft.Automation/automationAccounts/{self.config.automation_account}"
+            f"/jobs/{job_id}/output?api-version=2023-11-01"
+        )
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/octet-stream"
+            }
+        response = requests.get(output_url, headers=headers)
+        if response.status_code == 200:
+            logging.info("Fetched output for the job '%s'.", job_id)
+            return response.text
+
+        logging.warning(
+            "Failed to fetch the output '%s'. status: %s, Bodr: %s",
+            job_id,
+            response.status_code,
+            response.text,
+            )
+        return None
+
+#=============================================Azure AI Foundry==========================================
+
+class FoundryAgentService:
+    """
+    Service wrapper for interacting with Azure AI Foundry agents.
+    """
+    def __init__(self, config: FoundryConfig, credential: DefaultAzureCredential):
+        self.config = config
+        self.project = AIProjectClient(endpoint= config.endpoint, credential=credential)
+        self.agent = self.project.agents.get_agent(self.config.user_readable_agent)
+    
+    
+    def resolve_message_user_format(self, issue_text: str) ->Optional[str]:
+        """
+        Sends the issue to the diagnostic agent and expects a final message
+        that contains the resolved runbook name.
+        Returns:
+            Resolved runbook name or None if no mapping was found.
+        """
+        Resolve_Logger={}
+
+        logging.info("Sending issue to Foundry diagnostic agent.")
+        thread = self.project.agents.threads.create()
+
+        self.project.agents.messages.create(
+            thread_id=thread.id,
+            role='user',
+            content=issue_text
+        )
+
+        run = self.project.agents.runs.create_and_process(
+            thread_id=thread.id,
+            agent_id=self.agent.id,
+            )
+
+        if run.status == "failed":
+            logging.error("Foundry run failed. Error: %s")
+            return None
+        messages = self.project.agents.messages.list(
+            thread_id = thread.id,
+            order = ListSortOrder.ASCENDING,
+        )
+    
+        resolved_runbook_name: Optional[str] = None
+        for message in messages:
+            if not message.text_messages:
+                continue
+            resolved_runbook_name= message.text_messages[-1].text.value
+        if resolved_runbook_name:
+            logging.info(
+                "Foundry diagnostic agent resolved runbook '%s'.",
+                resolved_runbook_name,
+            )
+        else:
+            logging.warning(
+                "Foundry diagnostic agent did not return a runbook name."
+            )
+        
+        return resolved_runbook_name
+#==============================================Azure Function Entry======================================
+
+def main(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    HTTP-triggered Azure Function entry point.
+    Responsibilities:
+    - Validate and parse request body.
+    - Load configuration (environment, automation, foundry).
+    - Resolve runbook name via Foundry agent.
+    - Optionally clone and publish an new runbook.
+    - Return a structured JSON response with detailed status.
+    """
+    correlation_id = req.headers.get("x-correlation-id", str(uuid.uuid4()))
+    logging.info("Request recieved for Agentic Automationfunction to get the output. CORRELATIONID = %s", correlation_id)
+    try:
+        # 1. Parse JSON body
+        session_id = req.params.get("session_id")
+        if not session_id:
+            return json_response(
+                {"Success":False, 
+                "error":{
+                    "message":f"Input Error.",
+                    "details": "session_id is not valid"
+                    }})
+        #3. Load configuration [Env, Automation, Foundry]
+        try:
+            config, foundry_dict, automation_dict = load_config_from_akeyless()
+        except EnvironmentError as environment_error:
+            logging.exception("Configuration loading failed.")
+            return json_response(
+                {"Success":False, 
+                "error":{
+                    "message":f"Configuration error.",
+                    "details": str(environment_error)
+                    }
+                },
+                status = 500
+            )
+        credential = get_default_credential()
+        automation_service = AzureautomationService(config.automation, credential)
+        event_logger= EventHubLogger(automation_dict, credential)
+        # 1. Log "Issue Recieved"
+        event_logger.send_event(
+            {
+                "event_type": "input recieved",
+                "correlation_id": correlation_id,
+                "environment": config.environment,
+                "timestamp_utc": datetime.utcnow().isoformat() +'Z',
+            }
+        )
+        runbook_name, target_machine, status, job_id = automation_service.fetch_jobs_from_azure_automation(session_id)
+        if status.lower()=="completed":
+            diagnostic_agent_response=automation_service.fetch_output_from_azure_automation(runbook_name,job_id)
+            foundry_service = FoundryAgentService(config.foundry, credential)
+            if not diagnostic_agent_response:
+                status='Failed'
+                user_readable_message='I am unable to process the request because of one of the following reason:- \n 1.] Machine Name is incorrect. \n2.] Machine not added to SCCM. \n3.] Machine is not on.'
+            elif diagnostic_agent_response.strip()=='Unmatched':
+                status='Failed'
+                user_readable_message='I can not complete this request as logged in user and requester are different.\n Please login to the machine to complete this request.'
+            else:
+                user_readable_message=foundry_service.resolve_message_user_format(diagnostic_agent_response)
+                if user_readable_message=='issue not found':
+                    status='Failed'
+                    user_readable_message="I haven't found any issue in your machine" 
+            return json_response(
+            {
+                "Success": True,
+                "job_id": job_id,
+                "target_machine": target_machine,
+                "environment": config.environment,
+                "original_runbook_name": runbook_name.split('_')[0]+'_'+runbook_name.split('_')[1],
+                "cloned_runbook_name": runbook_name,
+                "status": status,
+                "Servicenow_worknotes": diagnostic_agent_response,
+                "message": (
+                    f"I am done with the diagnosis and \n"
+                    f"{user_readable_message}"
+                    ),
+            },)
+        else:
+            time.sleep(25)
+            return json_response(
+            {
+                "Success": False,
+                "job_id": job_id,
+                "target_machine": target_machine,
+                "environment": config.environment,
+                "status": status,
+                "message": (
+                    f"Diagnosis process is in progress...\n"
+                    ),
+            },)
+
+    
+    except Exception as unhandled_exception:
+        #Final safeguard: log and return generic error
+        logging.exception("Unhandled exception in agentic automation function.")
+        return json_response(
+            {
+                "Success": False,
+                "error":{
+                    "message": "Unhandled Server error. Please contact the automation team.",
+                    "details": str(unhandled_exception),
+                }
+            },
+            status= 500
+        )

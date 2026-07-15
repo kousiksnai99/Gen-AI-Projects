@@ -1,3 +1,11 @@
+{
+    "Success": false,
+    "error": {
+        "message": "Unhandled server error. Please contact the automation team.",
+        "details": "'AgentsOperations' object has no attribute 'list_agents'"
+    }
+}
+
 You are an Orchestrator Agent for a Service Desk AI system.
 
 MULTI-LANGUAGE SUPPORT

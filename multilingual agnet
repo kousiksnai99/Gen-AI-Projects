@@ -1013,3 +1013,11 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             },
             status=500,
         )
+{
+    "Success": true,
+    "supported": true,
+    "language": "German",
+    "environment": "dev",
+    "correlation_id": "7967d0d9-d41a-49d3-a209-04aec85b67d5",
+    "reply": "Welche Fehlermeldung erscheint bzw. was genau passiert, wenn Sie Outlook öffnen (z. B. Absturz, bleibt hängen, startet gar nicht)?"
+}

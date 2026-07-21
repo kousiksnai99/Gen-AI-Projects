@@ -1,92 +1,593 @@
-Event Hub Configuration
+#####################################################################################
+## Project name : Multilingual Service Desk Agent (Agentic AI POC)                  #
+## Business owner , Team : Data and AIA                                             #
+## Code Author , Team : POC Team                                                    #
+## Date: 15th Jul 2026                                                              #
+## Purpose of Function:                                                             #
+##  HTTP-triggered Azure Function that exposes ONE endpoint with TWO modes,         #
+##  selected by the 'agent' field in the request:                                   #
+##                                                                                  #
+##    agent = 'detect'    -> returns ONLY the detected language of 'message'        #
+##                           [offline, deterministic, no LLM].                      #
+##    agent = 'translate' -> translates 'message' into the target 'lang' using      #
+##                           the Azure AI Foundry 'multilingual-agent'.             #
+##                                                                                  #
+## IMPORTANT (auth): the Foundry 'projects' endpoint uses Microsoft Entra ID only. #
+## The Function App's Managed Identity MUST live in the SAME tenant as the Foundry  #
+## project (e.g. Teva) and be granted the 'Azure AI User' role on that project.     #
+## A managed identity cannot authenticate across tenants, and API keys do NOT work  #
+## for this endpoint.                                                               #
+#####################################################################################
 
+# # Load all the libraries
+import json
+import logging
+import os
+import re
+import uuid
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
-Resource Group:
-rg-fbntf-ais-swce-poc
+import azure.functions as func
 
-
-Subscription Name:
-AZ-SUB-POC-AIS
-
-
-Subscription ID:
-4c85c528-9da9-48ac-a5c3-41bd351728eb
-
-
-Location:
-Sweden Central
-
-
-Namespace Host Name:
-ehn-hrmqc-ais-swce-poc.servicebus.windows.net
-
-
-Event Hub Name:
-ehn-hrmqc-ais-swce-poc
-
-
-SAS Policy ARM ID:
-/subscriptions/4c85c528-9da9-48ac-a5c3-41bd351728eb/resourceGroups/rg-fbntf-ais-swce-poc/providers/Microsoft.EventHub/namespaces/ehn-hrmqc-ais-swce-poc/authorizationrules/RootManageSharedAccessKey
-
-az login
-az account set --subscription "AZ-SUB-POC-AIS"
-
-
-from azure.eventhub import EventHubProducerClient, EventData, TransportType
+# Auth / SDKs
 from azure.identity import DefaultAzureCredential
 
-# Event Hub namespace + name
-NAMESPACE = "ehn-hrmqc-ais-swce-poc.servicebus.windows.net"
-EVENTHUB_NAME = "ehn-hrmqc-ais-swce-poc"
+# Azure AI Projects [Foundry agents]
+from azure.ai.projects import AIProjectClient
+from azure.ai.agents.models import ListSortOrder
 
-def main():
-    # Authenticate using your Azure AD login
-    credential = DefaultAzureCredential()
 
-    # Create producer client using WebSockets (port 443)
-    producer = EventHubProducerClient(
-        fully_qualified_namespace=NAMESPACE,
-        eventhub_name=EVENTHUB_NAME,
-        credential=credential,
-        transport_type=TransportType.AmqpOverWebsocket    # <-- important for VDI
+#=============================Logging Setup========================================================
+# Azure Function configures the root logger but we are ensuring the level.
+logging.getLogger().setLevel(logging.INFO)
+
+
+#=============================Data Class Module====================================================
+@dataclass
+class FoundryConfig:
+    """Configuration required for Azure AI Foundry interactions."""
+    endpoint: str
+    agent_name: str
+    agent_id: Optional[str] = None
+
+
+@dataclass
+class AppConfig:
+    """Configuration object for the function."""
+    environment: str
+    foundry: FoundryConfig
+
+
+#=========================================Helpers: Loading Configuration===========================
+def load_config() -> AppConfig:
+    """
+    Build AppConfig from environment variables (App Settings) with safe defaults.
+
+    Everything is overridable WITHOUT a code redeploy — set these in the Function
+    App -> Configuration -> Application settings:
+        FOUNDRY_ENDPOINT    - the Teva Foundry PROJECT endpoint
+        FOUNDRY_AGENT_NAME  - agent display name (default 'multilingual-agent')
+        FOUNDRY_AGENT_ID    - optional; if set, resolve by id and skip name lookup
+        ENVIRONMENT         - free-text label for the response (default 'dev')
+    """
+    logging.info("Loading configuration.")
+    foundry_cfg = FoundryConfig(
+        endpoint=os.getenv(
+            "FOUNDRY_ENDPOINT",
+            "https://aifoundry-rjteh-ais-swce-poc.services.ai.azure.com/api/projects/aifp-uqqnf-ais-swce-poc",
+        ),
+        agent_name=os.getenv("FOUNDRY_AGENT_NAME", "multilingual-agent"),
+        agent_id=(os.getenv("FOUNDRY_AGENT_ID") or None),
+    )
+    return AppConfig(environment=os.getenv("ENVIRONMENT", "dev"), foundry=foundry_cfg)
+
+
+#==============================================Utilities===========================================
+def json_response(payload: Dict[str, Any], status: int = 200) -> func.HttpResponse:
+    """
+    Returns a JSON-formatted HTTP response with consistent headers.
+
+    ensure_ascii=False keeps non-Latin scripts [Hebrew, Japanese, ...] readable
+    in the response body.
+    """
+    return func.HttpResponse(
+        body=json.dumps(payload, ensure_ascii=False),
+        status_code=status,
+        mimetype="application/json",
     )
 
-    print("Creating event batch...")
-    event_data_batch = producer.create_batch()
 
-    # Add messages
-    event_data_batch.add(EventData("Hello Event Hub from AAD over WebSockets!"))
+def get_default_credential():
+    """
+    Credential for the Foundry projects endpoint (Entra ID / AAD only).
 
-    print("Sending event...")
-    producer.send_batch(event_data_batch)
+    Deployed: resolves to the Function App's Managed Identity via
+    DefaultAzureCredential. The identity must be in the SAME tenant as the Foundry
+    project (e.g. Teva) and hold the 'Azure AI User' role on it.
 
-    print("Event sent successfully!")
+    Local testing: set env var LOCAL_INTERACTIVE_LOGIN=1 to sign in through the
+    browser instead (useful when the Azure CLI is not installed). Set
+    AZURE_TENANT_ID to the Teva tenant GUID to sign in against that directory.
+    This branch is never taken in Azure because the env var is not set there.
+    """
+    tenant_id = os.getenv("AZURE_TENANT_ID") or None
 
-if __name__ == "__main__":
-    main()
+    if os.getenv("LOCAL_INTERACTIVE_LOGIN", "").lower() in ("1", "true", "yes"):
+        from azure.identity import InteractiveBrowserCredential
+
+        logging.info(
+            "Using InteractiveBrowserCredential for local sign-in (tenant=%s).",
+            tenant_id or "default",
+        )
+        return InteractiveBrowserCredential(tenant_id=tenant_id)
+
+    return DefaultAzureCredential(
+        exclude_interactive_browser_credential=True,
+        exclude_visual_studio_code_credential=True,
+        exclude_shared_token_cache_credential=True,
+        exclude_powershell_credential=True,
+    )
 
 
+def get_json_body(req: func.HttpRequest) -> Dict[str, Any]:
+    """
+    Parse the JSON request body ONCE and return it as a dict.
 
-Creating event batch...
-Traceback (most recent call last):
-  File "F:\Kousik\helpdesk_assistant\eventhub_send.py", line 32, in <module>
-    main()
-    ~~~~^^
-  File "F:\Kousik\helpdesk_assistant\eventhub_send.py", line 21, in main
-    event_data_batch = producer.create_batch()
-  File "C:\Users\KSNAI\AppData\Local\Programs\Python\Python313\Lib\site-packages\azure\eventhub\_producer_client.py", line 799, in create_batch
-    self._get_max_message_size()
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^
-  File "C:\Users\KSNAI\AppData\Local\Programs\Python\Python313\Lib\site-packages\azure\eventhub\_producer_client.py", line 355, in _get_max_message_size
-    cast(EventHubProducer, self._producers[ALL_PARTITIONS])._open_with_retry()
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
-  File "C:\Users\KSNAI\AppData\Local\Programs\Python\Python313\Lib\site-packages\azure\eventhub\_producer.py", line 147, in _open_with_retry
-    return self._do_retryable_operation(self._open, operation_need_param=False)
-           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\KSNAI\AppData\Local\Programs\Python\Python313\Lib\site-packages\azure\eventhub\_client_base.py", line 608, in _do_retryable_operation
-    raise last_exception from None
-azure.eventhub.exceptions.AuthenticationError: CBS Token authentication failed.
-Status code: None
-Error: client-error
-CBS Token authentication failed.
-Status code: None
+    Returns an empty dict when there is no body or it is not valid JSON, so every
+    caller can safely use `.get(...)` without repeating the try/except guard.
+    """
+    try:
+        body = req.get_json()
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
+def extract_agent(req: func.HttpRequest, body: Dict[str, Any]) -> Optional[str]:
+    """
+    Read which mode/agent the caller wants: 'detect' or 'translate'.
+
+    Accepted from the query string (?agent=) or the JSON body, and normalised to
+    lower-case. Returns None when it is missing.
+    """
+    agent = req.params.get("agent") or body.get("agent")
+    if isinstance(agent, str) and agent.strip():
+        return agent.strip().lower()
+    return None
+
+
+def extract_message(req: func.HttpRequest, body: Dict[str, Any]) -> Optional[str]:
+    """Read the user message from the query string or the JSON body."""
+    message = req.params.get("message") or req.params.get("q") or req.params.get("query")
+    if message:
+        return message
+    return (
+        body.get("message")
+        or body.get("query")
+        or body.get("text")
+        or body.get("prompt")
+    )
+
+
+def extract_lang(req: func.HttpRequest, body: Dict[str, Any]) -> Optional[str]:
+    """
+    Read the TARGET language token for 'translate' mode.
+
+    Accepted from the query string (?lang=) or the JSON body ('lang'/'language').
+    Returns the raw token (e.g. 'jp', 'ja', 'Japanese') or None when missing;
+    resolve_language() maps it to a supported display name.
+    """
+    lang = (
+        req.params.get("lang")
+        or req.params.get("language")
+        or body.get("lang")
+        or body.get("language")
+    )
+    if isinstance(lang, str) and lang.strip():
+        return lang.strip()
+    return None
+
+
+#==============================================Language Detection==================================
+# ISO 639-1 code -> display name, for the SUPPORTED languages only.
+SUPPORTED: Dict[str, str] = {
+    "en": "English",
+    "he": "Hebrew",
+    "hr": "Croatian",
+    "bg": "Bulgarian",
+    "ro": "Romanian",
+    "fr": "French",
+    "de": "German",
+    "cs": "Czech",
+    "ru": "Russian",
+    "it": "Italian",
+    "nl": "Dutch",
+    "hu": "Hungarian",
+    "pl": "Polish",
+    "es": "Spanish",
+    "sl": "Slovenian",
+    "sk": "Slovak",
+    "el": "Greek",
+    "pt": "Portuguese",
+    "sr": "Serbian",
+    "bs": "Bosnian",
+    "mk": "Macedonian",
+    "kk": "Kazakh",
+    "uk": "Ukrainian",
+    "ko": "Korean",
+    "ja": "Japanese",
+    "ms": "Malay",
+    "id": "Indonesian",
+    "th": "Thai",
+    "vi": "Vietnamese",
+    "tr": "Turkish",
+    # Written text cannot separate Mandarin vs Cantonese, so both map here.
+    "zh": "Chinese (Mandarin)",
+}
+
+# Languages we deliberately DETECT so they get correctly REJECTED instead of
+# being misread as a supported language [all UNSUPPORTED].
+DECOYS = ["hi", "ur", "ar", "bn", "ta", "te", "fa", "mr", "pa", "gu", "kn", "ml"]
+
+NOT_SUPPORTED_MESSAGE = (
+    "I'm sorry, this language is not currently supported. Please switch to one of "
+    "the supported languages to continue. supported languages are: English, Hebrew, "
+    "Croatian, Bulgarian, Romanian, French, German, Czech, Russian, Italian, Dutch, "
+    "Hungarian, Polish, Spanish, Slovenian, Slovak, Greek, Portuguese, Serbian, "
+    "Bosnian, Macedonian, Kazakh, Ukrainian, Korean, Japanese, Malay, Indonesian, "
+    "Thai, Vietnamese, Turkish, Chinese (Mandarin), Chinese (Cantonese)"
+)
+
+# Common non-ISO / colloquial aliases callers may send for the TARGET language
+# (e.g. 'jp' for Japanese, 'kr' for Korean) -> the real ISO 639-1 code.
+LANG_ALIASES: Dict[str, str] = {
+    "jp": "ja",
+    "kr": "ko",
+    "cn": "zh",
+    "gr": "el",
+    "cz": "cs",
+    "ua": "uk",
+}
+
+
+def resolve_language(lang: Optional[str]) -> Optional[str]:
+    """
+    Resolve a caller-supplied language token to a SUPPORTED display name.
+
+    Accepts an ISO 639-1 code ('ja'), a common alias ('jp'), or the English
+    display name ('Japanese'), all case-insensitively. Returns None when the
+    target language is unknown or not in the supported list.
+    """
+    if not lang:
+        return None
+    key = lang.strip().lower()
+    key = LANG_ALIASES.get(key, key)
+    if key in SUPPORTED:
+        return SUPPORTED[key]
+    for name in SUPPORTED.values():
+        if name.lower() == key:
+            return name
+    return None
+
+
+# Below this confidence, and not clearly English, default to English
+# [per the rule "if uncertain, respond in English"].
+_MIN_CONFIDENCE = 0.55
+
+# Scripts NO supported language uses -> instant, guaranteed reject.
+_DEVANAGARI = re.compile("[ऀ-ॿ]")            # Hindi, Marathi, Nepali...
+_ARABIC = re.compile("[؀-ۿݐ-ݿ]")   # Arabic, Urdu, Persian...
+
+
+class LanguageDetector:
+    """
+    Offline, deterministic language detector [py3langid]. No LLM is used, so it
+    cannot hallucinate or reply in the wrong language: the same input always
+    returns the same output.
+    """
+
+    def __init__(self):
+        self._identifier = None
+
+    def _get_identifier(self):
+        """Lazy-load and cache the detector, restricted to supported + decoys."""
+        if self._identifier is None:
+            from py3langid.langid import LanguageIdentifier, MODEL_FILE
+
+            identifier = LanguageIdentifier.from_pickled_model(MODEL_FILE, norm_probs=True)
+            identifier.set_languages(list(SUPPORTED.keys()) + DECOYS)
+            self._identifier = identifier
+        return self._identifier
+
+    def detect(self, text: str) -> Dict[str, Any]:
+        """
+        Detect the language of `text` and say whether it is supported.
+
+        Returns a dict:
+            input      - the original text
+            language   - display name if supported, else None
+            code       - ISO 639-1 code of the best guess
+            supported  - True/False
+            confidence - 0.0 .. 1.0
+            message    - None if supported, else the exact "not supported" text
+        """
+        text = (text or "").strip()
+        if not text:
+            return self._supported("en", 1.0, text)  # nothing to detect -> English
+
+        # Hard deterministic rejects [scripts no supported language uses].
+        if _DEVANAGARI.search(text):
+            return self._rejected("hi", 1.0, text)
+        if _ARABIC.search(text):
+            return self._rejected("ar", 1.0, text)
+
+        code, confidence = self._get_identifier().classify(text)
+
+        # Low confidence and not clearly English -> default to English.
+        if confidence < _MIN_CONFIDENCE and code != "en":
+            return self._supported("en", confidence, text)
+
+        if code in SUPPORTED:
+            return self._supported(code, confidence, text)
+        return self._rejected(code, confidence, text)
+
+    @staticmethod
+    def _supported(code: str, confidence: float, text: str) -> Dict[str, Any]:
+        return {
+            "input": text,
+            "language": SUPPORTED[code],
+            "code": code,
+            "supported": True,
+            "confidence": round(float(confidence), 4),
+            "message": None,
+        }
+
+    @staticmethod
+    def _rejected(code: str, confidence: float, text: str) -> Dict[str, Any]:
+        return {
+            "input": text,
+            "language": None,
+            "code": code,
+            "supported": False,
+            "confidence": round(float(confidence), 4),
+            "message": NOT_SUPPORTED_MESSAGE,
+        }
+
+
+# Cache the detector across warm invocations [loading the model is expensive].
+_DETECTOR = LanguageDetector()
+
+
+#=============================================Azure AI Foundry=====================================
+class FoundryAgentService:
+    """
+    Service wrapper for interacting with the Azure AI Foundry multilingual agent.
+    The agent is resolved by ID if FOUNDRY_AGENT_ID is set, otherwise by NAME.
+    """
+
+    def __init__(self, config: FoundryConfig, credential):
+        self.config = config
+        self.project = AIProjectClient(endpoint=config.endpoint, credential=credential)
+        self.agent = self._resolve_agent(config)
+
+    def _resolve_agent(self, config: FoundryConfig):
+        """
+        Resolve the agent.
+
+        1. If an explicit agent id is configured -> fetch it directly (most
+           reliable; no listing / permissions on list needed).
+        2. Otherwise list agents and match by name; if duplicates exist, the
+           newest one wins. On failure, log EVERY visible name so the real cause
+           (wrong project / tenant / name) is obvious.
+        """
+        if config.agent_id:
+            agent = self.project.agents.get_agent(config.agent_id)
+            logging.info(
+                "Resolved Foundry agent by id -> %s (name=%s).",
+                agent.id,
+                getattr(agent, "name", None),
+            )
+            return agent
+
+        all_agents = list(self.project.agents.list_agents())
+        available_names = [getattr(a, "name", None) for a in all_agents]
+        logging.info(
+            "Foundry project returned %d agent(s): %s",
+            len(all_agents),
+            available_names,
+        )
+
+        matches = [
+            agent for agent in all_agents
+            if getattr(agent, "name", None) == config.agent_name
+        ]
+        if not matches:
+            raise RuntimeError(
+                f"Agent '{config.agent_name}' not found. Endpoint='{config.endpoint}'. "
+                f"Visible agents ({len(available_names)}): {available_names}. "
+                f"If this list is EMPTY, the app identity is pointed at the wrong "
+                f"project/tenant or is missing the 'Azure AI User' role on the project."
+            )
+
+        matches.sort(key=lambda a: str(getattr(a, "created_at", "") or ""))
+        agent = matches[-1]
+        logging.info("Resolved Foundry agent '%s' -> %s.", config.agent_name, agent.id)
+        return agent
+
+    def _run_and_get_reply(
+        self, text: str, additional_instructions: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Create a thread, post `text`, run the agent and return its reply text.
+
+        `additional_instructions` is passed straight through to the run so callers
+        can steer the agent (e.g. "translate into Japanese"). Returns None if the
+        run fails or the agent produces no text.
+        """
+        thread = self.project.agents.threads.create()
+
+        self.project.agents.messages.create(
+            thread_id=thread.id,
+            role="user",
+            content=text,
+        )
+
+        run_kwargs: Dict[str, Any] = {"thread_id": thread.id, "agent_id": self.agent.id}
+        if additional_instructions:
+            run_kwargs["additional_instructions"] = additional_instructions
+
+        run = self.project.agents.runs.create_and_process(**run_kwargs)
+
+        if run.status == "failed":
+            logging.error("Foundry run failed. Error: %s", getattr(run, "last_error", None))
+            return None
+
+        messages = self.project.agents.messages.list(
+            thread_id=thread.id,
+            order=ListSortOrder.ASCENDING,
+        )
+
+        reply: Optional[str] = None
+        for message in messages:
+            if not message.text_messages:
+                continue
+            reply = message.text_messages[-1].text.value
+        return reply
+
+    def translate_message(self, text: str, target_language: str) -> Optional[str]:
+        """
+        Translate `text` into `target_language` using the Foundry agent.
+
+        The agent is instructed to return ONLY the translation so the reply can be
+        used verbatim. Returns the translated text or None if the run failed.
+        """
+        logging.info("Translating message into %s via Foundry agent.", target_language)
+        reply = self._run_and_get_reply(
+            text,
+            additional_instructions=(
+                f"Translate the user's message into {target_language}. "
+                f"Return ONLY the translated text, with no explanations, notes, "
+                f"or the original message."
+            ),
+        )
+
+        if reply:
+            logging.info("Foundry multilingual agent returned a translation.")
+        else:
+            logging.warning("Foundry multilingual agent did not return any text.")
+        return reply
+
+
+#==============================================Azure Function Entry================================
+def main(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    HTTP-triggered Azure Function entry point.
+
+    Routes the request by the 'agent' field:
+    - 'detect'    -> detect the language offline and return ONLY the language.
+    - 'translate' -> translate 'message' into the target 'lang' via Foundry.
+
+    Always returns a structured JSON response.
+    """
+    correlation_id = req.headers.get("x-correlation-id", str(uuid.uuid4()))
+    logging.info(
+        "Request received for Multilingual Agent function. CORRELATION_ID = %s",
+        correlation_id,
+    )
+
+    try:
+        # 0. Parse the JSON body once and work out which mode was requested.
+        body = get_json_body(req)
+        agent_mode = extract_agent(req, body)
+
+        # 1. Read the user message [required for both modes].
+        user_message = extract_message(req, body)
+        if not user_message or not str(user_message).strip():
+            return json_response(
+                {
+                    "Success": False,
+                    "error": {
+                        "message": "Input Error.",
+                        "details": "message is required [query string or JSON body].",
+                    },
+                },
+                status=400,
+            )
+
+        # 2a. DETECT mode -> offline language detection only, no LLM call.
+        if agent_mode == "detect":
+            detection = _DETECTOR.detect(str(user_message))
+            return json_response(
+                {
+                    "Success": True,
+                    "agent": "detect",
+                    "supported": detection["supported"],
+                    "language": detection["language"],
+                    "code": detection["code"],
+                    "confidence": detection["confidence"],
+                    "correlation_id": correlation_id,
+                    "message": detection["message"],
+                }
+            )
+
+        # 2b. TRANSLATE mode -> translate the message into the requested language.
+        if agent_mode == "translate":
+            target_language = resolve_language(extract_lang(req, body))
+            if not target_language:
+                return json_response(
+                    {
+                        "Success": False,
+                        "error": {
+                            "message": "Input Error.",
+                            "details": (
+                                "'lang' is required for translate and must be a "
+                                "supported language. " + NOT_SUPPORTED_MESSAGE
+                            ),
+                        },
+                    },
+                    status=400,
+                )
+
+            # Load configuration + credential, then call the Foundry agent.
+            config = load_config()
+            credential = get_default_credential()
+            foundry_service = FoundryAgentService(config.foundry, credential)
+            reply = foundry_service.translate_message(str(user_message), target_language)
+
+            return json_response(
+                {
+                    "Success": True,
+                    "agent": "translate",
+                    "language": target_language,
+                    "environment": config.environment,
+                    "correlation_id": correlation_id,
+                    "reply": reply,
+                }
+            )
+
+        # 3. Missing / unknown agent -> tell the caller the valid options.
+        return json_response(
+            {
+                "Success": False,
+                "error": {
+                    "message": "Input Error.",
+                    "details": "agent is required and must be 'detect' or 'translate'.",
+                },
+            },
+            status=400,
+        )
+
+    except Exception as unhandled_exception:
+        # Final safeguard: log and return generic error
+        logging.exception("Unhandled exception in Multilingual Agent function.")
+        return json_response(
+            {
+                "Success": False,
+                "error": {
+                    "message": "Unhandled server error. Please contact the automation team.",
+                    "details": str(unhandled_exception),
+                },
+            },
+            status=500,
+        )

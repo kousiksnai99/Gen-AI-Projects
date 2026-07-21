@@ -591,3 +591,9 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             },
             status=500,
         )
+
+
+{ "agent": "detect", "message": "こんにちは、パスワードをリセットしたいです" }
+
+
+{ "agent": "translate", "message": "I forgot my password, can you help me reset it?", "lang": "jp" }

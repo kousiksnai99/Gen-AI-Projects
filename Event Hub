@@ -594,6 +594,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 { "agent": "detect", "message": "こんにちは、パスワードをリセットしたいです" }
 { "agent": "translate", "message": "I forgot my password, can you help me reset it?", "lang": "jp" }
 { "agent": "detect", "message": "नमस्ते, मैं अपना पासवर्ड रीसेट करना चाहता हूँ" }
+{"agent":"detect","message":"Kannettava tietokoneeni ei muodosta yhteyttä wifiin"}
 
 --index-url https://sonatypeprd.teva.corp/repository/pypi.org/simple
 --trusted-host sonatypeprd.teva.corp

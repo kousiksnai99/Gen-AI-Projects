@@ -598,3 +598,26 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
 { "agent": "translate", "message": "I forgot my password, can you help me reset it?", "lang": "jp" }
 { "agent": "detect", "message": "नमस्ते, मैं अपना पासवर्ड रीसेट करना चाहता हूँ" }
+
+--index-url https://sonatypeprd.teva.corp/repository/pypi.org/simple
+--trusted-host sonatypeprd.teva.corp
+python-dotenv
+automation
+fastapi
+azure-ai-projects==1.0.0
+azure.identity>=1.16.0
+azure.mgmt.automation
+six
+akeyless
+azure-functions
+pydantic
+azure-ai-agents==1.0.2
+akeyless_cloud_id
+azure-eventhub
+asyncio
+starlette>1.0.1
+py3langid
+openai>=2.8.0,<3
+azure-keyvault-secrets>=4.9
+PyYAML>=6.0.2
+requests>=2.32

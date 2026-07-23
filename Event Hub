@@ -617,3 +617,10 @@ openai>=2.8.0,<3
 azure-keyvault-secrets>=4.9
 PyYAML>=6.0.2
 requests>=2.32
+{
+    "Success": false,
+    "error": {
+        "message": "Unhandled server error. Please contact the automation team.",
+        "details": "'AgentsOperations' object has no attribute 'list_agents'"
+    }
+}

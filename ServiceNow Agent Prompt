@@ -7,9 +7,15 @@
 ##   interaction / incident ids in the exact fields the orchestrator reads.         #
 ##                                                                                  #
 ##   Two modes (SERVICENOW_MOCK_MODE):                                              #
-##     true  (default) -> returns fake ids, no external calls (unchanged behavior). #
-##     false           -> forwards the message to the real Foundry 'servicenow-agent'#
+##     true            -> returns fake ids, no external calls (offline mock).       #
+##     false (default) -> forwards the message to the real Foundry 'servicenow-agent'#
 ##                        (Responses API + agent_reference) and returns its result. #
+##                                                                                  #
+##   Authentication:                                                                #
+##     The Foundry PROJECT endpoint accepts Microsoft Entra ID (AAD) tokens ONLY.   #
+##     The Function App's Managed Identity must live in the SAME tenant as the      #
+##     Foundry project and hold the 'Azure AI User' role on it. API keys do NOT     #
+##     work for this endpoint (same access pattern as the multilingual-agent).      #
 ##                                                                                  #
 ##   Actions handled (must match the orchestrator's snow_* helpers):               #
 ##     action=create_interaction | user=<user_id>                                   #
@@ -31,8 +37,13 @@ import logging
 import os
 import random
 import re
+import threading
 
 import azure.functions as func
+
+# Auth / SDKs -- Foundry Agent Service via Managed Identity (Entra ID).
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
 
 
 #=============================Logging Setup========================================================
@@ -44,15 +55,17 @@ logging.getLogger().setLevel(logging.INFO)
 # when true it returns fake ids. Default is false here so the agent is active.
 MOCK_MODE = os.getenv("SERVICENOW_MOCK_MODE", "false").strip().lower() in ("1", "true", "yes", "on")
 
-# Foundry 'servicenow-agent' settings. The endpoint and agent name are safe to keep in
-# code; the API KEY must NEVER be committed -- set it as a Function App Application Setting
-# named AZURE_OPENAI_API_KEY (Portal > Function App > Settings > Environment variables).
-FOUNDRY_PROJECT_ENDPOINT = os.getenv(
-    "FOUNDRY_PROJECT_ENDPOINT",
+# Foundry 'servicenow-agent' settings (overridable via App Settings, safe defaults here).
+# No secrets: auth is Managed Identity, so nothing sensitive lives in this file.
+FOUNDRY_ENDPOINT = os.getenv(
+    "FOUNDRY_ENDPOINT",
     "https://aifoundry-rjteh-ais-swce-poc.services.ai.azure.com/api/projects/aifp-uqqnf-ais-swce-poc",
 )
-FOUNDRY_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "")
-AGENT_NAME = os.getenv("AGENT_NAME", "servicenow-agent")
+AGENT_NAME = os.getenv("FOUNDRY_AGENT_NAME", "servicenow-agent")
+
+# Per-call timeout + SDK retries on transient Foundry failures (429 / 5xx / timeout).
+FOUNDRY_TIMEOUT_SECONDS = 60.0
+FOUNDRY_MAX_RETRIES = 1
 
 
 #==============================================Utilities===========================================
@@ -103,31 +116,83 @@ def fake_number(prefix: str) -> str:
 
 
 #==============================================Real Foundry agent==================================
-def call_agent(message: str) -> str:
-    """Forward the orchestrator's action string to the real Foundry 'servicenow-agent' and
-    return its reply text. Uses the OpenAI-compatible Responses API on the project endpoint
-    with an 'agent_reference', authenticated with the API key."""
-    if not FOUNDRY_PROJECT_ENDPOINT or not FOUNDRY_API_KEY:
-        raise RuntimeError(
-            "Real-agent mode is on but FOUNDRY_PROJECT_ENDPOINT / AZURE_OPENAI_API_KEY are not set."
-        )
-    from openai import OpenAI  # lazy import so mock mode never needs the package at runtime
+# The Foundry client + credential are relatively expensive to build (token acquisition, HTTP
+# session). Build ONCE per worker and reuse across warm invocations, guarded by a lock.
+_agent_lock = threading.Lock()
+_openai_client = None
 
-    client = OpenAI(
-        base_url=FOUNDRY_PROJECT_ENDPOINT.rstrip("/") + "/openai/v1",
-        api_key=FOUNDRY_API_KEY,
-        timeout=60,
+
+def _get_openai_client():
+    """Build once (per worker) an OpenAI-compatible client bound to the Foundry project via
+    Managed Identity (Entra ID), and reuse it. The project endpoint accepts Entra ID tokens
+    only -- API keys do NOT work here."""
+    global _openai_client
+    if _openai_client is not None:
+        return _openai_client
+    with _agent_lock:
+        if _openai_client is None:
+            credential = DefaultAzureCredential()
+            try:
+                project = AIProjectClient(
+                    endpoint=FOUNDRY_ENDPOINT, credential=credential, allow_preview=True
+                )
+            except TypeError:
+                # Installed build does not accept allow_preview.
+                project = AIProjectClient(endpoint=FOUNDRY_ENDPOINT, credential=credential)
+            client = project.get_openai_client()
+            try:
+                client = client.with_options(
+                    timeout=FOUNDRY_TIMEOUT_SECONDS, max_retries=FOUNDRY_MAX_RETRIES
+                )
+            except Exception:  # pragma: no cover - older/looser client builds
+                pass
+            _openai_client = client
+    return _openai_client
+
+
+def _extract_reply(response) -> str:
+    """Pull the assistant text out of a Responses API result.
+
+    Prefers the SDK's `output_text` convenience; falls back to walking the `output`
+    items so it stays robust if that helper is ever absent.
+    """
+    text = getattr(response, "output_text", None)
+    if text and text.strip():
+        return text.strip()
+    parts = []
+    for item in getattr(response, "output", None) or []:
+        if getattr(item, "type", None) != "message":
+            continue
+        for block in getattr(item, "content", None) or []:
+            value = getattr(block, "text", None)
+            if value:
+                parts.append(value)
+    return "".join(parts).strip()
+
+
+def call_agent(message: str) -> str:
+    """Send the orchestrator's action string to the Foundry 'servicenow-agent' and return its
+    reply text. Uses AIProjectClient + Managed Identity + the Responses API (agent_reference) --
+    the same access pattern proven by the multilingual agent."""
+    if not FOUNDRY_ENDPOINT:
+        raise RuntimeError("Real-agent mode is on but FOUNDRY_ENDPOINT is not set.")
+    client = _get_openai_client()
+
+    # 1. Seed a conversation with the orchestrator's raw action message.
+    conversation = client.conversations.create(
+        items=[{"type": "message", "role": "user", "content": message}]
     )
-    prompt = (
-        f"{message}\n\n"
-        'Reply ONLY with a compact JSON object using these keys: "interaction_id", '
-        '"incident_id", "message". Use empty strings for any that do not apply.'
+    # 2. Run the named agent over that conversation via the Responses API.
+    response = client.responses.create(
+        conversation=conversation.id,
+        input=(
+            "Process the ServiceNow request in the conversation. Reply ONLY with a compact "
+            'JSON object using these keys: "interaction_id", "incident_id", "message". '
+            "Use empty strings for any that do not apply."
+        ),
+        extra_body={"agent_reference": {"name": AGENT_NAME, "type": "agent_reference"}},
     )
-    resp = client.responses.create(
-        input=prompt,
-        extra_body={"agent_reference": {"type": "agent_reference", "name": AGENT_NAME}},
-    )
-    return resp.output_text or ""
+    return _extract_reply(response)
 
 
 def _parse_agent_json(text: str) -> dict:

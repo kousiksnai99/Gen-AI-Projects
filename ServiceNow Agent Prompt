@@ -327,3 +327,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 2 create incident	{ "message": "action=create_incident | interaction_id=IMS0001234 | issue_type=email | details=Outlook crashing" }	{"incident_id":"INC…","interaction_id":"IMS0001234","issue_type":"email","message":"Incident INC… has been created under interaction IMS0001234."}	same fields; incident_id + message from the agent
 3 update incident	{ "message": "action=update_incident | incident_id=INC0009876 | note=User confirmed still broken" }	{"incident_id":"INC0009876","note":"…","message":"Incident INC0009876 updated."}	same fields, from the agent
 4 resolve	{ "message": "action=resolve | interaction_id=IMS0001234 | incident_id=INC0009876" }	{"incident_id":"INC0009876","interaction_id":"IMS0001234","message":"Incident INC0009876 has been resolved."}
+{
+    "message": "ServiceNow agent error.",
+    "details": "Real-agent mode is on but FOUNDRY_PROJECT_ENDPOINT / AZURE_OPENAI_API_KEY are not set."
+}

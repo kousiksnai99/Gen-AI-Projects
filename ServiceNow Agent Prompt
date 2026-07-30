@@ -44,16 +44,14 @@ logging.getLogger().setLevel(logging.INFO)
 # when true it returns fake ids. Default is false here so the agent is active.
 MOCK_MODE = os.getenv("SERVICENOW_MOCK_MODE", "false").strip().lower() in ("1", "true", "yes", "on")
 
-# Foundry 'servicenow-agent' settings. Hardcoded here because app settings aren't used;
-# an env var still overrides if one is ever set. NOTE: rotate this key after go-live.
+# Foundry 'servicenow-agent' settings. The endpoint and agent name are safe to keep in
+# code; the API KEY must NEVER be committed -- set it as a Function App Application Setting
+# named AZURE_OPENAI_API_KEY (Portal > Function App > Settings > Environment variables).
 FOUNDRY_PROJECT_ENDPOINT = os.getenv(
     "FOUNDRY_PROJECT_ENDPOINT",
     "https://aifoundry-rjteh-ais-swce-poc.services.ai.azure.com/api/projects/aifp-uqqnf-ais-swce-poc",
 )
-FOUNDRY_API_KEY = os.getenv(
-    "AZURE_OPENAI_API_KEY",
-    "G3T2HOKaVUTwDmDkV0OaEOrlsjO90eJPfaWZErYpODlIvzuOhEMoJQQJ99BJACfhMk5XJ3w3AAAAACOG8gdK",
-)
+FOUNDRY_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "")
 AGENT_NAME = os.getenv("AGENT_NAME", "servicenow-agent")
 
 
@@ -259,6 +257,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             {"message": "ServiceNow agent error.", "details": str(exc)},
             status=500,
         )
+
 
 
 VS403654: The push was rejected because it contains one or more secrets. Resolve the following secrets before pushing again. See https://aka.ms/advancedsecurity/secret-scanning/push-protection for help. Secrets: commit: eb9467ecf2113c2e04bcaf6c051ce6a11ee68cf2 paths: /ServiceNow_Agent/__init__.py(55,6-90) : SEC101/205 : AzureAIServicesCommonAnnotatedKey

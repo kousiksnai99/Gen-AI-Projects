@@ -261,6 +261,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
+VS403654: The push was rejected because it contains one or more secrets. Resolve the following secrets before pushing again. See https://aka.ms/advancedsecurity/secret-scanning/push-protection for help. Secrets: commit: eb9467ecf2113c2e04bcaf6c051ce6a11ee68cf2 paths: /ServiceNow_Agent/__init__.py(55,6-90) : SEC101/205 : AzureAIServicesCommonAnnotatedKey
+
 # ServiceNow Ticketing Agent — System Prompt
 
 ## Role

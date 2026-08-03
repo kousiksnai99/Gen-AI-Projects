@@ -1,0 +1,21 @@
+ServiceNow Agent — Deliverables
+Create the ticket/interaction creation workflow function — HTTP-triggered Azure Function as the orchestrator's single entry point.
+Implement action-routing logic for the full ticket lifecycle — create interaction, create incident, update incident, resolve, close.
+Implement ticket-to-incident conversion for unresolved cases — an open interaction is escalated into an incident under the same conversation.
+Create a common, reusable agent-integration framework — Foundry Responses API + agent_reference, ready to reuse for future API integrations.
+Implement secure authentication via Managed Identity (Entra ID) — no secrets in code; reusable across other agents.
+Implement single-incident-per-conversation continuity — conversation_id → correlation_id, one conversation maps to exactly one incident.
+Prepare integration interfaces/placeholders for the client ticketing APIs — agent tool layer stubbed until live ServiceNow APIs/credentials arrive.
+Create the Ticket (Interaction/IMS) and Incident (INC) data models/response templates — the exact fields the orchestrator consumes.
+Implement testing with dummy data until actual APIs are available — agent-generated placeholder IDs + Postman end-to-end flow.
+Timeline
+#	Deliverable	Start	End	Status
+1	Ticket/interaction creation workflow function	28 Jul	29 Jul	✅ Done
+2	Action-routing logic (full lifecycle)	29 Jul	30 Jul	✅ Done
+3	Ticket-to-incident conversion (unresolved cases)	30 Jul	31 Jul	✅ Done
+4	Common agent-integration framework	30 Jul	30 Jul	✅ Done
+5	Secure authentication (Managed Identity)	30 Jul	30 Jul	✅ Done
+6	Single-incident-per-conversation continuity	31 Jul	01 Aug	✅ Done
+7	Integration placeholders for client ticketing APIs	01 Aug	02 Aug	🔄 Placeholder (awaiting APIs)
+8	Ticket & Incident data models/templates	31 Jul	01 Aug	✅ Done
+9	Testing with dummy data (Postman)	03 Aug	05 Aug	🔄 In progress

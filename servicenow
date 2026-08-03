@@ -19,3 +19,13 @@ Timeline
 7	Integration placeholders for client ticketing APIs	01 Aug	02 Aug	🔄 Placeholder (awaiting APIs)
 8	Ticket & Incident data models/templates	31 Jul	01 Aug	✅ Done
 9	Testing with dummy data (Postman)	03 Aug	05 Aug	🔄 In progress
+
+Built one main service that handles all support ticket requests.
+It can log a query, create a ticket, update it, resolve it, and close it.
+If an issue isn't solved, it automatically turns it into a support ticket.
+Built in a reusable way, so new systems can be added easily later.
+One conversation always stays linked to one ticket — no mix-ups.
+Ready to connect to the real ServiceNow system whenever access is given.
+Uses a fixed, clean format so ticket details are always consistent.
+Fully tested end-to-end with sample data until the live system is ready.
+

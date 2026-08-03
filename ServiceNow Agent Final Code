@@ -1,0 +1,294 @@
+#####################################################################################
+## Project name : ServiceNow Agent (real Foundry agent)                             #
+## Business owner , Team : Data and AIA                                             #
+## Purpose of Function:                                                             #
+##   HTTP-triggered Azure Function that fronts the ServiceNow ticketing agent.      #
+##   It parses the orchestrator's "action=... | key=value" message and returns the  #
+##   interaction / incident ids in the exact fields the orchestrator reads.         #
+##                                                                                  #
+##   Every request is forwarded to the real Foundry 'servicenow-agent' (Responses   #
+##   API + agent_reference). The orchestrator's conversation_id is passed through to #
+##   the agent as the ServiceNow correlation_id, so the SAME incident is managed     #
+##   across every action in a conversation (single-incident-per-conversation).       #
+##                                                                                  #
+##   Authentication:                                                                #
+##     The Foundry PROJECT endpoint accepts Microsoft Entra ID (AAD) tokens ONLY.   #
+##     The Function App's Managed Identity must live in the SAME tenant as the      #
+##     Foundry project and hold the 'Azure AI User' role on it. API keys do NOT     #
+##     work for this endpoint (same access pattern as the multilingual-agent).      #
+##                                                                                  #
+##   Actions handled (must match the orchestrator's snow_* helpers):               #
+##     action=create_interaction | user=<user_id>                                   #
+##         -> {"interaction_id": "IMS0001234", "message": "..."}                    #
+##     action=close_interaction  | interaction_id=<id>                              #
+##         -> {"message": "..."}                                                    #
+##     action=create_incident    | interaction_id=<id> | issue_type=<..> |          #
+##                                 details=<..>                                     #
+##         -> {"incident_id": "INC0009876", "message": "..."}                       #
+##     action=update_incident    | incident_id=<id> | note=<..>                     #
+##         -> {"incident_id": "INC0009876", "message": "..."}                       #
+##     action=resolve            | interaction_id=<id> | incident_id=<id>           #
+##         -> {"message": "..."}                                                    #
+#####################################################################################
+
+# # Load all the libraries
+import json
+import logging
+import os
+import re
+import threading
+
+import azure.functions as func
+
+# Auth / SDKs -- Foundry Agent Service via Managed Identity (Entra ID).
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+
+
+#=============================Logging Setup========================================================
+logging.getLogger().setLevel(logging.INFO)
+
+
+#=============================Configuration========================================================
+# Foundry 'servicenow-agent' settings (overridable via App Settings, safe defaults here).
+# No secrets: auth is Managed Identity, so nothing sensitive lives in this file.
+FOUNDRY_ENDPOINT = os.getenv(
+    "FOUNDRY_ENDPOINT",
+    "https://aifoundry-rjteh-ais-swce-poc.services.ai.azure.com/api/projects/aifp-uqqnf-ais-swce-poc",
+)
+AGENT_NAME = os.getenv("FOUNDRY_AGENT_NAME", "servicenow-agent")
+
+# Per-call timeout + SDK retries on transient Foundry failures (429 / 5xx / timeout).
+FOUNDRY_TIMEOUT_SECONDS = 60.0
+FOUNDRY_MAX_RETRIES = 1
+
+
+#==============================================Utilities===========================================
+def json_response(payload: dict, status: int = 200) -> func.HttpResponse:
+    """Return a JSON HTTP response (ensure_ascii=False keeps any non-Latin text readable)."""
+    return func.HttpResponse(
+        body=json.dumps(payload, ensure_ascii=False),
+        status_code=status,
+        mimetype="application/json",
+    )
+
+
+def extract_request(req: func.HttpRequest) -> tuple:
+    """Read the orchestrator's 'conversation_id' + 'message' (the action string).
+
+    The orchestrator POSTs {"conversation_id": ..., "message": "action=... | ..."}.
+    We also accept ?conversation_id=...&message=... for quick manual curl testing.
+    """
+    try:
+        body = req.get_json()
+    except ValueError:
+        body = None
+    if isinstance(body, dict):
+        conversation_id = str(body.get("conversation_id") or "")
+        message = str(body.get("message") or "")
+    else:
+        conversation_id, message = "", ""
+    conversation_id = conversation_id or req.params.get("conversation_id", "") or ""
+    message = message or req.params.get("message", "") or ""
+    return conversation_id, message
+
+
+def parse_action(message: str) -> dict:
+    """Parse 'action=create_incident | interaction_id=IMS1 | details=...' into a dict.
+
+    Splits on '|' then on the FIRST '=' so a value may itself contain '='. NOTE: if a
+    free-text value (e.g. details) contains a literal '|', it will be truncated at that
+    pipe -- fine for a dummy, but a real agent should use a JSON body to avoid this.
+    """
+    fields: dict = {}
+    for part in (message or "").split("|"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        fields[key.strip()] = value.strip()
+    return fields
+
+
+#==============================================Real Foundry agent==================================
+# The Foundry client + credential are relatively expensive to build (token acquisition, HTTP
+# session). Build ONCE per worker and reuse across warm invocations, guarded by a lock.
+_agent_lock = threading.Lock()
+_openai_client = None
+
+# One Foundry conversation per orchestrator conversation_id, cached per worker so the agent
+# keeps context (and REUSES the same ticket numbers) across every action in a conversation.
+_conversations = {}
+
+
+def _get_openai_client():
+    """Build once (per worker) an OpenAI-compatible client bound to the Foundry project via
+    Managed Identity (Entra ID), and reuse it. The project endpoint accepts Entra ID tokens
+    only -- API keys do NOT work here."""
+    global _openai_client
+    if _openai_client is not None:
+        return _openai_client
+    with _agent_lock:
+        if _openai_client is None:
+            credential = DefaultAzureCredential()
+            try:
+                project = AIProjectClient(
+                    endpoint=FOUNDRY_ENDPOINT, credential=credential, allow_preview=True
+                )
+            except TypeError:
+                # Installed build does not accept allow_preview.
+                project = AIProjectClient(endpoint=FOUNDRY_ENDPOINT, credential=credential)
+            client = project.get_openai_client()
+            try:
+                client = client.with_options(
+                    timeout=FOUNDRY_TIMEOUT_SECONDS, max_retries=FOUNDRY_MAX_RETRIES
+                )
+            except Exception:  # pragma: no cover - older/looser client builds
+                pass
+            _openai_client = client
+    return _openai_client
+
+
+def _get_conversation(client, conversation_id: str) -> str:
+    """Return the Foundry conversation id for this orchestrator conversation_id, creating it
+    once and reusing it thereafter. This is what makes the agent remember the numbers it
+    generated earlier, so create -> update -> resolve all act on the SAME incident."""
+    key = conversation_id or "default"
+    existing = _conversations.get(key)
+    if existing:
+        return existing
+    with _agent_lock:
+        existing = _conversations.get(key)
+        if existing:
+            return existing
+        conversation = client.conversations.create(
+            items=[
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": (
+                        f"correlation_id={conversation_id}. "
+                        "This conversation manages exactly ONE ServiceNow incident."
+                    ),
+                }
+            ]
+        )
+        _conversations[key] = conversation.id
+        return conversation.id
+
+
+def _extract_reply(response) -> str:
+    """Pull the assistant text out of a Responses API result.
+
+    Prefers the SDK's `output_text` convenience; falls back to walking the `output`
+    items so it stays robust if that helper is ever absent.
+    """
+    text = getattr(response, "output_text", None)
+    if text and text.strip():
+        return text.strip()
+    parts = []
+    for item in getattr(response, "output", None) or []:
+        if getattr(item, "type", None) != "message":
+            continue
+        for block in getattr(item, "content", None) or []:
+            value = getattr(block, "text", None)
+            if value:
+                parts.append(value)
+    return "".join(parts).strip()
+
+
+def call_agent(message: str, conversation_id: str) -> str:
+    """Send the orchestrator's action string to the Foundry 'servicenow-agent' and return its
+    reply text. The orchestrator's conversation_id is handed to the agent as the ServiceNow
+    correlation_id so it manages the SAME incident across the whole conversation.
+    Uses AIProjectClient + Managed Identity + the Responses API (agent_reference) -- the same
+    access pattern proven by the multilingual agent."""
+    if not FOUNDRY_ENDPOINT:
+        raise RuntimeError("FOUNDRY_ENDPOINT is not set.")
+    client = _get_openai_client()
+
+    # Reuse ONE Foundry conversation per conversation_id so the agent remembers the numbers it
+    # generated earlier -- then append this action to it and let the agent process it.
+    conv_id = _get_conversation(client, conversation_id)
+    response = client.responses.create(
+        conversation=conv_id,
+        input=(
+            f"{message}\n\n"
+            f"(correlation_id for this incident = '{conversation_id}'.) "
+            "Process this ServiceNow request. Reply ONLY with a compact JSON object using "
+            'these keys: "interaction_id", "incident_id", "message". '
+            "Use empty strings for any that do not apply."
+        ),
+        extra_body={"agent_reference": {"name": AGENT_NAME, "type": "agent_reference"}},
+    )
+    return _extract_reply(response)
+
+
+def _parse_agent_json(text: str) -> dict:
+    """Best-effort parse of the agent reply into a dict; falls back to {'message': text}."""
+    text = (text or "").strip()
+    candidates = [text]
+    if "{" in text and "}" in text:
+        candidates.append(text[text.find("{"): text.rfind("}") + 1])
+    for candidate in candidates:
+        try:
+            obj = json.loads(candidate)
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return {"message": text}
+
+
+def _find_number(text: str, prefix: str) -> str:
+    """Pull a ServiceNow-style number (e.g. INC0012345 / IMS0007654) out of free text."""
+    match = re.search(rf"\b{prefix}\d+\b", text or "")
+    return match.group(0) if match else ""
+
+
+def agent_result(action: str, fields: dict, message: str, conversation_id: str) -> dict:
+    """Call the real agent and shape its reply into the SAME fields the orchestrator reads.
+    The ticket numbers come from the agent -- taken from its JSON reply, else parsed out of
+    its text -- never faked."""
+    reply = call_agent(message, conversation_id)
+    data = _parse_agent_json(reply)
+    interaction_id = str(data.get("interaction_id") or _find_number(reply, "IMS") or fields.get("interaction_id", ""))
+    incident_id = str(data.get("incident_id") or _find_number(reply, "INC") or fields.get("incident_id", ""))
+    msg = str(data.get("message") or reply or "")
+
+    if action == "create_interaction":
+        return {"interaction_id": interaction_id, "user": fields.get("user", ""), "message": msg}
+    if action == "close_interaction":
+        return {"interaction_id": interaction_id, "message": msg}
+    if action == "create_incident":
+        return {
+            "incident_id": incident_id,
+            "interaction_id": interaction_id,
+            "issue_type": fields.get("issue_type", ""),
+            "message": msg,
+        }
+    if action == "update_incident":
+        return {"incident_id": incident_id, "note": fields.get("note", ""), "message": msg}
+    if action == "resolve":
+        return {"incident_id": incident_id, "interaction_id": interaction_id, "message": msg}
+    return {"message": msg or "ServiceNow: no matching action.", "action": action}
+
+
+#==============================================Azure Function Entry================================
+def main(req: func.HttpRequest) -> func.HttpResponse:
+    """HTTP entry point: parse the action and return the real ServiceNow agent's result."""
+    conversation_id, message = extract_request(req)
+    fields = parse_action(message)
+    action = fields.get("action", "")
+    logging.info("ServiceNow: conversation_id=%s action=%s fields=%s", conversation_id, action, fields)
+
+    try:
+        # Always delegate to the Foundry 'servicenow-agent' and return the same structured
+        # fields the orchestrator reads. conversation_id is passed through as correlation_id.
+        return json_response(agent_result(action, fields, message, conversation_id))
+    except Exception as exc:  # final safety net
+        logging.exception("ServiceNow agent error")
+        return json_response(
+            {"message": "ServiceNow agent error.", "details": str(exc)},
+            status=500,
+        )

@@ -42,3 +42,27 @@ NUMBER RULES:
 REPLY FORMAT — reply with ONLY a compact JSON object, nothing else:
 {"interaction_id": "...", "incident_id": "...", "message": "..."}
 Use an empty string "" for any field that does not apply to the current action.
+
+
+
+
+
+
+{ "conversation_id": "conv-1001", "message": "action=create_interaction | user=john.doe" }
+
+{ "conversation_id": "conv-1001", "message": "action=create_incident | interaction_id=IMS0001234 | issue_type=email | details=Cannot access mailbox" }
+
+{ "conversation_id": "conv-1001", "message": "action=update_incident | incident_id=INC0009876 | note=User called again for an update" }
+
+{ "conversation_id": "conv-1001", "message": "action=resolve | interaction_id=IMS0001234 | incident_id=INC0009876" }
+
+{ "conversation_id": "conv-1001", "message": "action=close_interaction | interaction_id=IMS0001234" }
+
+{ "conversation_id": "conv-9999", "message": "action=create_incident | interaction_id=IMS0005555 | issue_type=vpn | details=VPN not connecting" }
+
+{ "conversation_id": "conv-2001", "message": "action=foobar | x=1" }
+
+{ "conversation_id": "conv-2002", "message": "" }
+
+{ "message": "action=create_interaction | user=jane.doe" }
+

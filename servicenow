@@ -20,12 +20,13 @@ Timeline
 8	Ticket & Incident data models/templates	31 Jul	01 Aug	✅ Done
 9	Testing with dummy data (Postman)	03 Aug	05 Aug	🔄 In progress
 
-Built one main service that handles all support ticket requests.
-It can log a query, create a ticket, update it, resolve it, and close it.
-If an issue isn't solved, it automatically turns it into a support ticket.
-Built in a reusable way, so new systems can be added easily later.
-One conversation always stays linked to one ticket — no mix-ups.
-Ready to connect to the real ServiceNow system whenever access is given.
-Uses a fixed, clean format so ticket details are always consistent.
-Fully tested end-to-end with sample data until the live system is ready.
+Feature Name
+"Main Ticket Service - Built one main service that handles all support ticket requests."
+"Full Ticket Lifecycle - It can log a query, create a ticket, update it, resolve it, and close it."
+"Auto Query-to-Ticket - If an issue isn't solved, it automatically turns it into a support ticket."
+"Reusable Framework - Built in a reusable way, so new systems can be added easily later."
+"One Conversation = One Ticket - One conversation always stays linked to one ticket, no mix-ups."
+"ServiceNow-Ready Integration - Ready to connect to the real ServiceNow system whenever access is given."
+"Standard Ticket Format - Uses a fixed, clean format so ticket details are always consistent."
+"End-to-End Testing - Fully tested end-to-end with sample data until the live system is ready."
 

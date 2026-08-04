@@ -66,3 +66,16 @@ Use an empty string "" for any field that does not apply to the current action.
 
 { "message": "action=create_interaction | user=jane.doe" }
 
+I've completed end-to-end testing of the ServiceNow Agent function in Postman. All 10 test scenarios ran successfully. The screenshots of each test run are sent in Teva.
+Test scenarios covered:
+Create Interaction
+Create Incident
+Update Incident
+Resolve Incident
+Close Interaction
+New Conversation → New Incident (isolation check)
+Invalid Action Handling
+Empty Message Handling
+Missing Conversation ID
+GET Request Support
+All cases passed. Please let me know if any additional scenarios are needed.

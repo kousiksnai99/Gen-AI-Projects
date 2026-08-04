@@ -66,35 +66,3 @@ Use an empty string "" for any field that does not apply to the current action.
 
 { "message": "action=create_interaction | user=jane.doe" }
 
-English
-Hebrew
-Croatian
-Bulgarian
-Romanian
-French
-German
-Czech
-Russian
-Italian
-Dutch
-Hungarian
-polish
-Spanish
-Slovak
-Greek
-Portuguese
-Serbian
-Bosnian
-Macedonian
-Kazakh
-Ukrainian
-Korean
-Japanese
-Arabic
-Malay
-Indonesian
-Thai
-Vietnamese
-Turkish
-Chinese-Mandarin
-Chinese-cantonese

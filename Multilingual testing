@@ -1,0 +1,92 @@
+# 1. English (en)  ->  200, supported=true, code=en
+{"agent":"detect","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 2. Hebrew (he)  ->  200, supported=true, code=he
+{"agent":"detect","message":"שלום, המחשב הנייד שלי לא מתחבר לרשת האלחוטית במשרד מהבוקר, אנא פתחו קריאה ועזרו לי בהקדם."}
+
+# 3. Croatian (hr)  ->  200, supported=true, code in [hr | bs | sr | sl]
+{"agent":"detect","message":"Dobar dan, moje prijenosno računalo se od jutros ne može povezati na bežičnu mrežu u uredu, molim vas otvorite prijavu i pomozite mi."}
+
+# 4. Bulgarian (bg)  ->  200, supported=true, code in [bg | mk]
+{"agent":"detect","message":"Здравейте, моят лаптоп не може да се свърже с безжичната мрежа в офиса от тази сутрин, моля отворете заявка и ми помогнете."}
+
+# 5. Romanian (ro)  ->  200, supported=true, code=ro
+{"agent":"detect","message":"Bună ziua, laptopul meu nu se poate conecta la rețeaua wireless din birou de azi dimineață, vă rog să deschideți un tichet și să mă ajutați."}
+
+# 6. French (fr)  ->  200, supported=true, code=fr
+{"agent":"detect","message":"Bonjour, mon ordinateur portable ne parvient pas à se connecter au réseau sans fil du bureau depuis ce matin, merci d'ouvrir un ticket et de m'aider."}
+
+# 7. German (de)  ->  200, supported=true, code=de
+{"agent":"detect","message":"Guten Tag, mein Laptop kann sich seit heute Morgen nicht mit dem WLAN im Büro verbinden, bitte erstellen Sie ein Ticket und helfen Sie mir."}
+
+# 8. Czech (cs)  ->  200, supported=true, code in [cs | sk]
+{"agent":"detect","message":"Dobrý den, můj notebook se od dnešního rána nemůže připojit k bezdrátové síti v kanceláři, prosím založte tiket a pomozte mi."}
+
+# 9. Russian (ru)  ->  200, supported=true, code in [ru | uk]
+{"agent":"detect","message":"Здравствуйте, мой ноутбук с сегодняшнего утра не может подключиться к беспроводной сети в офисе, пожалуйста, создайте заявку и помогите мне."}
+
+# 10. Italian (it)  ->  200, supported=true, code=it
+{"agent":"detect","message":"Buongiorno, il mio computer portatile non riesce a connettersi alla rete wireless dell'ufficio da questa mattina, per favore aprite un ticket e aiutatemi."}
+
+# 11. Dutch (nl)  ->  200, supported=true, code=nl
+{"agent":"detect","message":"Goedendag, mijn laptop kan sinds vanmorgen geen verbinding maken met het draadloze netwerk op kantoor, gelieve een ticket aan te maken en mij te helpen."}
+
+# 12. Hungarian (hu)  ->  200, supported=true, code=hu
+{"agent":"detect","message":"Jó napot, a laptopom ma reggel óta nem tud kapcsolódni az irodai vezeték nélküli hálózathoz, kérem nyissanak egy hibajegyet és segítsenek."}
+
+# 13. Polish (pl)  ->  200, supported=true, code=pl
+{"agent":"detect","message":"Dzień dobry, mój laptop od dzisiejszego rana nie może połączyć się z siecią bezprzewodową w biurze, proszę założyć zgłoszenie i mi pomóc."}
+
+# 14. Spanish (es)  ->  200, supported=true, code=es
+{"agent":"detect","message":"Buenos días, mi ordenador portátil no puede conectarse a la red inalámbrica de la oficina desde esta mañana, por favor abran un ticket y ayúdenme."}
+
+# 15. Slovenian (sl)  ->  200, supported=true, code in [sl | hr | bs | sr]
+{"agent":"detect","message":"Dober dan, moj prenosni računalnik se od danes zjutraj ne more povezati z brezžičnim omrežjem v pisarni, prosim odprite zahtevek in mi pomagajte."}
+
+
+
+
+# 1. -> English (en) [source=French]  ->  200, language=English
+{"agent":"translate","lang":"en","message":"Bonjour, mon ordinateur portable ne parvient pas à se connecter au réseau sans fil du bureau depuis ce matin, merci d'ouvrir un ticket et de m'aider."}
+
+# 2. -> Hebrew (he)  ->  200, language=Hebrew, reply must be in Hebrew script
+{"agent":"translate","lang":"he","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 3. -> Croatian (hr)  ->  200, language=Croatian
+{"agent":"translate","lang":"hr","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 4. -> Bulgarian (bg)  ->  200, language=Bulgarian, reply must be in Cyrillic script
+{"agent":"translate","lang":"bg","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 5. -> Romanian (ro)  ->  200, language=Romanian
+{"agent":"translate","lang":"ro","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 6. -> French (fr)  ->  200, language=French
+{"agent":"translate","lang":"fr","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 7. -> German (de)  ->  200, language=German
+{"agent":"translate","lang":"de","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 8. -> Czech (cs)  ->  200, language=Czech
+{"agent":"translate","lang":"cs","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 9. -> Russian (ru)  ->  200, language=Russian, reply must be in Cyrillic script
+{"agent":"translate","lang":"ru","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 10. -> Italian (it)  ->  200, language=Italian
+{"agent":"translate","lang":"it","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 11. -> Dutch (nl)  ->  200, language=Dutch
+{"agent":"translate","lang":"nl","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 12. -> Hungarian (hu)  ->  200, language=Hungarian
+{"agent":"translate","lang":"hu","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 13. -> Polish (pl)  ->  200, language=Polish
+{"agent":"translate","lang":"pl","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 14. -> Spanish (es)  ->  200, language=Spanish
+{"agent":"translate","lang":"es","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}
+
+# 15. -> Slovenian (sl)  ->  200, language=Slovenian
+{"agent":"translate","lang":"sl","message":"Hello team, my laptop will not connect to the office wifi network since this morning, so please raise a ticket and help me urgently."}

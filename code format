@@ -1,0 +1,393 @@
+##################################################################################### 
+## Project name : Agentic AI POC                                                    #
+## Business owner , Team : ITOA                                                     #
+## Notebook Author , Team: TOA Project AI Team                                      #
+## Date: 7th Dec 2026                                                               #
+## Puprose of Notebook:                                                             #
+## HTTPS-triggered Azure Function that:                                             #
+##      1. Recieves issue description from a user from ITSM agent [MS Tems + Kore]. #
+##      2. Uses Azure AI Foundry diagnostic agent to identify the issue to an       #
+##         Azure Automation Runbook.                                                #
+##      3. Clones the runbook with additional metadata [eg. target machine] and     #
+##         publish it for execution.                                                #
+##      4. This published rubook is executed in target machine via SCCM.            #
+##         This is done by running script by hybrid worker.                         #     
+##      Runbook def:- These are powershell script hosted on azure automation that   # 
+##                    are used to diagnose issues based on the KB articles provided.#                                                              
+##      Hybrid Worker:- It is a component in Azure Automation that run automation   # 
+##                    scripts (runbooks) directly on on-premises servers. It acts   #
+##                    as an agent, pulling jobs from Azure Automation and executing # 
+##                    them where the resources reside, overcoming limitations of    # 
+##                    cloud-only workers.                                           #  
+## Note:-                                                                           #
+##     - From utils.py json_response, validate_request_body, get_default_credential #
+##       are called.                                                                #
+##          - json_response:- This is used to standardise the response              #
+##          - validate_request_body:- Function validates the input coming from Kore #
+##          - get_default_credential: - To validate using managed identity          #
+##     -From app_config load_config_from_dict is imported to load the configuration #
+##      details like resource group name, automation account name etc.              #
+##     -From services folder eventhub, automation_service and foundry_service are   #
+##      imported to use respective services.    
+#####################################################################################
+
+
+
+# # Load all the libraries
+import json                                     # json for serializing HTTP responses
+import logging                                  # logging used across module for observability and debugging
+import uuid                                     # Universally Unique Identifiers to provide virtually unique, globally unique labels for data
+from datetime import datetime
+import azure.functions as func                  # Azure Functions HttpResponse type used by utilities
+
+# Access the storage account added for future application
+from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
+from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
+
+from dotenv import load_dotenv                   # Load Environment Variables like Subscription ID
+load_dotenv()
+
+
+# Load user defined functions 
+# Import functions from project file
+from app_config import load_config_from_dict
+from utils import json_response, validate_request_body, get_default_credential
+from services.eventhub_service import EventHubLogger
+from services.automation_service import AzureautomationService
+from services.foundry_service import FoundryAgentService
+#=============================Logging Setup========================================================
+# Azure Functions configures the root logger; we explicitly set level here to be explicit about expected verbosity.
+logging.getLogger().setLevel(logging.INFO) # Ensure at least INFO logs are emitted
+
+#==============================================Azure Function Entry======================================
+
+def main(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    HTTP-triggered Azure Function entry point.
+    Responsibilities:  
+    - Validate and parse incoming request JSON payload.  
+    - Load configuration and authenticate using managed identity.  
+    - Use Foundry to resolve which Automation runbook should run for the issue text.  
+    - Clone, annotate, publish and run the resolved runbook on the Hybrid Worker group.  
+    - Emit telemetry events and return a structured JSON response including timing and resolution logs.  
+  
+    Why:  
+    - This function orchestrates the end-to-end flow from issue text to automated diagnostics,  
+      while avoiding embedded secrets and centralizing telemetry for monitoring.  
+  
+    Returns:  
+    - func.HttpResponse with JSON body describing success/failure and identifiers for tracking. 
+    """
+
+    # get external correlation id or generate one for tracing  
+    # correlation for logs
+    correlation_id = req.headers.get("x-correlation-id", str(uuid.uuid4()))
+
+    # log incoming request and correlation id  
+    # entry log  
+    logging.info("Request recieved for Agentic Automationfunction. CORRELATIONID = %s", correlation_id)
+
+    # prepare dictionary to collect stage timestamps for response debugging  
+    # timing telemetry container
+    time_logger={}
+
+    # top-level try to catch unexpected errors and return a 500 with details
+    # guard for unexpected exceptions
+    try:  
+        # 1. Parse JSON body
+        # nested try to give a clearer 400 error for invalid JSON  
+        # handle bad JSON specifically 
+        try:    
+            time_logger['JSON_Parser_Start']=datetime.utcnow().isoformat() +'Z' # record JSON parse start time [timestamp]  
+            request_body = req.get_json()   # parse JSON payload from the HttpRequest object  [read JSON body]  
+            time_logger['JSON_Parser_End']=datetime.utcnow().isoformat() +'Z'   # record JSON parse end time [timestamp]  
+        
+        # raised by get_json if payload is not valid JSON  
+        # identifies if json is valid or not
+        except ValueError:  
+            logging.warning("Invalid JSON in request body.")    # log a warning to indicate client error  [warn client]  
+            
+            return json_response(   # return 400 with a helpful message so clients can correct payload [respond with bad request] 
+                {"Success": False, "error": {"message":"Invalid JSOn payload."}},
+                status = 400
+            )
+        
+        # 2. Validate Schema
+        try:    # schema validation isolated so we can return a 400 for contract violations  # validate contract 
+            
+            # timestamp start for validation  # timestamp  
+            # 'Z' is the zone designator for the zero UTC offset, indicating that the time is in Coordinated Universal Time (UTC)
+            time_logger['Schema_Validation_Start']=datetime.utcnow().isoformat() +'Z' 
+            
+            # validate and normalize fields  # parse and validate    
+            issue, execute, target_machine, session_id, loggedin_username = validate_request_body(request_body)
+            
+            # timestamp end for validation  # timestamp  
+            # 'Z' is the zone designator for the zero UTC offset, indicating that the time is in Coordinated Universal Time (UTC)
+            time_logger['Schema_Validation_End']=datetime.utcnow().isoformat() +'Z'
+
+        # validation errors are surfaced as ValueError from helper  
+        # catch validation errors      
+        except ValueError as value_error:
+            # log validation failure details  
+            # warn validation 
+            logging.warning("Request validation failed: %s", value_error)
+            return json_response(
+                # return 400 describing which field failed validation  
+                # respond with validation error  
+                {"Success": False, "error":{"message": str(value_error)}},
+                status= 400
+            )
+
+        #3. Load configuration [Env, Automation, Foundry]
+
+        # handle config load errors distinctly so we can return a 500 with context  
+        # load configuration
+        try:
+            # record config load start time  
+            # timestamp  
+            # 'Z' is the zone designator for the zero UTC offset, indicating that the time is in Coordinated Universal Time (UTC)
+            time_logger['Config_Start']=datetime.utcnow().isoformat() +'Z'
+            
+            # build AppConfig and supportive dicts (dev stub)  
+            # load config  
+            config, foundry_dict, automation_dict = load_config_from_dict()
+
+            # record config load end time  
+            # timestamp  
+            # 'Z' is the zone designator for the zero UTC offset, indicating that the time is in Coordinated Universal Time (UTC)
+            time_logger['Config_End']=datetime.utcnow().isoformat() +'Z'
+
+        # capture environment/config related exceptions  
+        # catch config errors    
+        except EnvironmentError as environment_error:
+            # log full stack for ops to inspect  
+            # error log  
+            logging.exception("Configuration loading failed.")
+            return json_response(
+                {"Success":False, 
+                "error":{
+                    "message":f"Configuration error.",
+                    "details": str(environment_error)
+                    }
+                },
+                status = 500
+            )
+
+        # obtain DefaultAzureCredential to use managed identity for all SDK calls  
+        # get managed identity credential  
+
+
+        credential = get_default_credential()
+
+        # instantiate automation helper with config and credential  
+        # create automation service  
+        automation_service = AzureautomationService(config.automation, credential)
+
+        # instantiate foundry helper to resolve runbooks  
+        # create foundry service
+        foundry_service = FoundryAgentService(config.foundry, credential)
+
+        # telemetry helper to emit events to Event Hub via AAD  
+        # create event logger 
+        event_logger= EventHubLogger(automation_dict, credential)
+        
+        # emit an event indicating we received an issue (non-blocking by design)  
+        # send telemetry event 
+        event_logger.send_event(
+            {
+                "event_type": "Agent Recieves the input",   # simple event type used for downstream filtering  # event type  
+                "correlation_id": correlation_id,           # correlate to request for tracing across systems  # correlation id
+                "environment": config.environment,          # include environment so metrics can be segmented  # env tag  
+                "target_machine": target_machine,           # include target machine for context  # target context  
+                "execute": execute,                         # include whether caller asked to execute or just simulate  # execution flag 
+                # 'Z' is the zone designator for the zero UTC offset, indicating that the time is in Coordinated Universal Time (UTC)
+                "timestamp_utc": datetime.utcnow().isoformat() +'Z',    # timestamp for the event  # event timestamp
+                "input_to_agent": issue,                   # input text recieved by the agent
+                "user_id": loggedin_username,              # user logged in to the teams chat
+            }
+        )
+
+        #4. Resolve runbook using AI Foundry Agent
+
+        # call foundry and get potential runbook name + logger  
+        # resolve runbook
+        runbook_name, Resolve_Logger = foundry_service.resolve_runbook_from_issue(issue)
+        event_logger.send_event(
+            {
+                "event_type": "Diagnostic Agent Response",  # simple event type used for downstream filtering  # event type  
+                "correlation_id": correlation_id,           # correlate to request for tracing across systems  # correlation id
+                "environment": config.environment,          # include environment so metrics can be segmented  # env tag  
+                "target_machine": target_machine,           # include target machine for context  # target context  
+                "execute": execute,                         # include whether caller asked to execute or just simulate  # execution flag 
+                "timestamp_utc": datetime.utcnow().isoformat() +'Z',    # timestamp for the event  # event timestamp
+                "agent_response": runbook_name,               # agents response
+                "user_id": loggedin_username,                 # user logged in to the teams chat
+            }
+        )
+
+        # if foundry couldn't map issue to runbook, emit event and return 404 so user can escalate  
+        # handle unresolved mapping  
+        if not runbook_name:
+            # log the resolution failure event for monitoring and alerting  
+            # telemetry
+            event_logger.send_event(
+                {
+                    "event_type": "Runbook Resolution Failed",  # event type for failed resolution  # type  
+                    "correlation_id": correlation_id,           # include correlation id so this event ties back to request  # correlation id
+                    "environment": config.environment,          # environment context  # env  
+                    "target_machine": target_machine,           # include target machine for context  # target context  
+                    "execute": execute,                         # include whether caller asked to execute or just simulate  # execution flag 
+                    "timestamp_utc": datetime.utcnow().isoformat() +'Z',    # when failure happened  # timestamp
+                    "message":"Agent is unable to find the runbook.",    # Message incase agent fails to respond
+                    "user_id": loggedin_username,              # user logged in to the teams chat
+                    
+                }
+            )
+            # return 404 to indicate we couldn't find an appropriate runbook  
+            # respond not found 
+            return json_response(
+                {"Success": False, "error": {"message":(
+                    "No Runbook could be resolved for the given issue.",
+                    "Please contact the agentic AI POC team."
+                    )}},
+                    status =404
+            )
+
+        #5. Execute path: Clone runbook with metadata, publish and Run
+
+        # attempt clone/publish/run and surface any exception as a 502 so caller knows it was downstream failure  
+        # clone & run
+        try:
+            # clone runbook with context and trigger execution  
+            # create clone & job
+            cloned_name, job_name, job_id = automation_service.clone_runbook_with_metadata(
+                source_runbook_name= runbook_name,  # name returned by Foundry  # original runbook name  
+                system_name = target_machine,       # target device for diagnostics  # target machine  
+                issue_text = issue,                 # original issue text for potential use inside runbook  # issue 
+                environment = config.environment,   # environment string for script annotation  # env  
+                session_id=session_id,              # session id used to make cloned name unique  # session id  
+                loggedin_username=loggedin_username, # username for runtime context inside script  # logged-in user 
+            )
+        
+        # catch any exception produced while cloning/publishing/executing  
+        # handle clone errors  
+        except Exception as unknown_exception:
+            logging.exception("Runbook cloning failed.")    # log full stack trace for operations to diagnose  # error log  
+            event_logger.send_event(    # emit telemetry event describing the clone failure for alerting  # telemetry
+                {
+                    "event_type": "Runbook Clone Failed",   # event type name  # type  
+                    "correlation_id": correlation_id,       # tie event back to request  # correlation id  
+                    "environment": config.environment,      # environment context  # env  
+                    "Original Runbook": runbook_name,       # original runbook name that we attempted to clone  # original runbook 
+                    "error": str(unknown_exception),        # include exception message for quick triage (avoid secrets)  # error details
+                    "timestamp_utc": datetime.utcnow().isoformat() +'Z',    # timestamp for the event  # timestamp
+                }
+            )
+
+            # return 502 indicating an upstream dependency failed (automation service)  
+            # respond bad gateway  
+            return json_response(   
+                {"Success": False,
+                "error":{
+                    "message":"Runbook cloning or publishing failed.",
+                    "details": str(unknown_exception)
+                    }
+                },
+                status = 502
+            )
+
+        # informational log confirming clone succeeded  # success log  
+        logging.info("Runbook cloned successfully: %s", cloned_name)
+        
+        # emit telemetry indicating the clone was successful and include relevant identifiers  
+        # telemetry
+        event_logger.send_event(
+            {
+                "event_type": "Runbook cloned successfully",    # event type  # type  
+                "correlation_id": correlation_id,               # correlation id for tracing  # correlation  
+                "environment": config.environment,              # environment context  # env  
+                "Original Runbook": runbook_name,               # original runbook name  # original  
+                "Cloned_Runbook": cloned_name,                  # cloned runbook name  # clone  
+                "target_machine": target_machine,               # target device  # target  
+                "timestamp_utc": datetime.utcnow().isoformat() +'Z',    # event timestamp  # timestamp
+            }
+        )
+
+        # optional: fetch runbook output if caller needs it  # optional fetch
+
+        # return 200 with structured information about what was executed and telemetry for debugging  
+        # success response  
+        return json_response(
+            {
+                "Success": True,                        # indicate success to the caller  # result  
+                "original_runbook_name": runbook_name,  # the runbook name found by Foundry  # original  
+                "cloned_runbook_name": cloned_name,     # the cloned runbook that was created  # clone  
+                "job_name":job_name,                    # job name created in Automation (useful for polling)  # job name 
+                "job_id": job_id,                       # job id (system identifier for the run)  # job id  
+                "executed": True,                       # whether the run was started  # executed flag  
+                "target_machine": target_machine,       # target device for executed runbook  # target  
+                "environment": config.environment,      # environment string used by the function  # env  
+                "message": (                            # user-friendly message explaining next steps  # message  
+                    f"Diagnosis process have been triggered and it may take few minutes."
+                    ),
+                "Time_Logger":time_logger,              # include timing telemetry to help with performance debugging  # timings  
+                "Resolution_Logger":Resolve_Logger      # include Foundry resolution telemetry for post-mortem analysis  # foundry logs  
+            },
+            status = 200
+        )
+
+    # catch any top-level unhandled exception to avoid leaking stack traces to clients  
+    # safety net  
+    except Exception as unhandled_exception:
+        # log full stack locally for operators  # error log  
+        logging.exception("Unhandled exception in agentic automation function.")
+        
+        # return a 500 to indicate server error and include the exception message for support  
+        # server error response  
+        return json_response(
+            {
+                "Success": False,
+                "error":{
+                    "message": "Unhandled Server error. Please contact the automation team.",
+                    "details": str(unhandled_exception),
+                }
+            },
+            status= 500
+        )
+
+
+# request_body={
+#     "issue": "emails are not syncing",
+#     "execute": True,
+#     "target_machine":"BLRNPV0120",
+#     "session_id":"testsession_11234",
+#     "loggedin_username": "VPRAKASH07"
+
+# }
+# issue, execute, target_machine, session_id, loggedin_username = validate_request_body(request_body)
+# config, foundry_dict, automation_dict = load_config_from_dict()   
+# credential = get_default_credential()
+# automation_service = AzureautomationService(config.automation, credential)
+# foundry_service = FoundryAgentService(config.foundry, credential)    
+# event_logger= EventHubLogger(automation_dict, credential)
+# print("Sending event to eventhub")
+# event_logger.send_event(
+#     {
+#         "event_type": "issue recieved",     # simple event type used for downstream filtering  # event type  
+#         "correlation_id": "correlation_id",   # correlate to request for tracing across systems  # correlation id
+#         "environment": "config.environment",  # include environment so metrics can be segmented  # env tag  
+#         "target_machine": "target_machine",   # include target machine for context  # target context  
+#         "execute": "execute",                 # include whether caller asked to execute or just simulate  # execution flag 
+#         "timestamp_utc": datetime.utcnow().isoformat() +'Z',    # timestamp for the event  # event timestamp
+#     }
+# )     
+# runbook_name, Resolve_Logger = foundry_service.resolve_runbook_from_issue(issue)
+# cloned_name, job_name, job_id = automation_service.clone_runbook_with_metadata(
+#     source_runbook_name= runbook_name,   
+#     system_name = target_machine,       # target device for diagnostics  # target machine  
+#     issue_text = issue,                 # original issue text for potential use inside runbook  # issue 
+#     environment = config.environment,   # environment string for script annotation  # env  
+#     session_id=session_id,              # session id used to make cloned name unique  # session id  
+#     loggedin_username=loggedin_username # username for runtime context inside script  # logged-in user 
+#     )

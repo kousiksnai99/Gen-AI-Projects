@@ -73,14 +73,10 @@ from azure.ai.projects import AIProjectClient        # Client used to reach the 
 
 
 #=============================Logging Setup========================================================
-# Use a module-scoped logger (never mutate the root logger as an import side-effect, which would
-# also change verbosity for the Azure SDKs / httpx and bypass host-side log configuration).
-logger = logging.getLogger("multilingual_agent")    # named logger owned by this module  # module logger
+logger = logging.getLogger("multilingual_agent")    # module-scoped: never mutate the root logger as an import side-effect  # module logger
 logger.setLevel(getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO))     # LOG_LEVEL App Setting wins, INFO otherwise  # verbosity
 
-# The active request's correlation id, propagated to every log record via a filter so a single
-# request can be traced end-to-end in Application Insights even under concurrent execution.
-_correlation_id_var: "contextvars.ContextVar[str]" = contextvars.ContextVar(     # per-request storage, safe under concurrency  # context variable
+_correlation_id_var: "contextvars.ContextVar[str]" = contextvars.ContextVar(     # per-request id, traceable end to end under concurrency  # context variable
     "correlation_id", default="-"               # '-' is used until a request sets a real id  # default value
 )
 
@@ -118,15 +114,9 @@ def _float_env(name: str, default: float) -> float:    # name: setting to read, 
         return default                          # absent/unparsable -> safe default  # fallback
 
 
-# Reject messages longer than this (characters) with a 400 - bounds LLM token cost / abuse.
-MAX_MESSAGE_CHARS = _int_env("MAX_MESSAGE_CHARS", 5000)     # maximum accepted message length  # input bound
-# Per-request timeout (seconds) applied to the Foundry/OpenAI client. Generous enough for a
-# slow-but-legitimate translation, but well under the Azure Functions ~230s HTTP hard limit
-# and the host.json functionTimeout so a hung upstream call cannot pin a worker indefinitely.
-FOUNDRY_TIMEOUT_SECONDS = _float_env("FOUNDRY_TIMEOUT_SECONDS", 60.0)   # upstream call timeout  # timeout
-# Automatic retries (SDK-level) on transient Foundry failures (429 / 5xx / timeouts). Kept low
-# so worst-case (attempts x timeout) stays inside functionTimeout.
-FOUNDRY_MAX_RETRIES = _int_env("FOUNDRY_MAX_RETRIES", 1)    # SDK-level retry attempts  # retries
+MAX_MESSAGE_CHARS = _int_env("MAX_MESSAGE_CHARS", 5000)     # longer messages get a 400; bounds LLM token cost / abuse  # input bound
+FOUNDRY_TIMEOUT_SECONDS = _float_env("FOUNDRY_TIMEOUT_SECONDS", 60.0)   # per-call timeout, well under the ~230s Functions HTTP limit  # timeout
+FOUNDRY_MAX_RETRIES = _int_env("FOUNDRY_MAX_RETRIES", 1)    # SDK retries on transient 429/5xx; low so attempts x timeout still fits  # retries
 
 
 #=============================Data Class Module====================================================
@@ -145,9 +135,7 @@ class AppConfig:                            # top-level configuration container 
 
 
 #=========================================Helpers: Loading Configuration===========================
-# Built-in POC endpoint used only when FOUNDRY_ENDPOINT is not configured. Production is
-# expected to override this via App Settings rather than rely on the value baked in here.
-_DEFAULT_ENDPOINT = (                           # POC fallback endpoint, never a secret  # default endpoint
+_DEFAULT_ENDPOINT = (                           # POC fallback only; production must override via App Settings  # default endpoint
     "https://aifoundry-rjteh-ais-swce-poc.services.ai.azure.com/api/projects/aifp-uqqnf-ais-swce-poc"    # built-in POC project endpoint  # url
 )
 
@@ -209,8 +197,7 @@ def get_default_credential():               # Entra ID credential for the Foundr
                     tenant_id or "default")     # 'default' when no tenant was pinned  # tenant label
         return InteractiveBrowserCredential(tenant_id=tenant_id)    # browser based sign-in for local testing  # local credential
 
-    # Deployed path: Managed Identity. Interactive/dev credential sources are
-    # excluded so credential resolution is fast and deterministic in Azure.
+    # Deployed path: dev credential sources are excluded so resolution is fast and deterministic.
     return DefaultAzureCredential(              # Managed Identity: SAME tenant as the project, 'Azure AI User' role  # managed identity
         exclude_interactive_browser_credential=True,    # never prompt inside a Function worker  # no prompts
         exclude_visual_studio_code_credential=True,     # dev-only source, irrelevant in Azure  # skip VS Code
@@ -282,9 +269,7 @@ def extract_lang(req: func.HttpRequest, body: Dict[str, Any]) -> Optional[str]: 
 
 
 #==============================================Language Detection==================================
-# ISO 639-1 code -> display name, for the SUPPORTED languages only. This is the
-# single source of truth for what the service will detect/accept as supported.
-SUPPORTED: Dict[str, str] = {                   # ISO 639-1 code -> English display name  # supported map
+SUPPORTED: Dict[str, str] = {                   # single source of truth: ISO 639-1 code -> English display name  # supported map
     "en": "English",                            # English  # en
     "he": "Hebrew",                             # Hebrew  # he
     "hr": "Croatian",                           # Croatian  # hr
@@ -320,9 +305,7 @@ SUPPORTED: Dict[str, str] = {                   # ISO 639-1 code -> English disp
     "zh": "Chinese (Mandarin)",                 # Chinese, covers Cantonese too  # zh
 }
 
-# Languages we deliberately DETECT (but never support) so they are correctly
-# REJECTED instead of being misread as a nearby supported language.
-DECOYS = ["hi", "ur", "ar", "bn", "ta", "te", "fa", "mr", "pa", "gu", "kn", "ml"]   # detected only to be rejected  # decoy codes
+DECOYS = ["hi", "ur", "ar", "bn", "ta", "te", "fa", "mr", "pa", "gu", "kn", "ml"]   # detected only so they get rejected, not misread as a neighbour  # decoy codes
 
 # Exact, user-facing message returned when a detected language is not supported.
 NOT_SUPPORTED_MESSAGE = (                       # exact wording agreed with the business  # reject message
@@ -334,19 +317,14 @@ NOT_SUPPORTED_MESSAGE = (                       # exact wording agreed with the 
     "Thai, Vietnamese, Turkish, Chinese (Mandarin), Chinese (Cantonese)"                # end of the list  # line 6
 )
 
-# Common non-ISO / colloquial aliases callers may send for the TARGET language
-# (e.g. 'jp' for Japanese, 'kr' for Korean) -> the real ISO 639-1 code.
-LANG_ALIASES: Dict[str, str] = {                # colloquial token -> real ISO 639-1 code  # alias map
+LANG_ALIASES: Dict[str, str] = {                # colloquial token callers send ('jp', 'kr') -> real ISO 639-1 code  # alias map
     "jp": "ja",                                 # Japan -> Japanese  # jp
     "kr": "ko",                                 # Korea -> Korean  # kr
     "cn": "zh",                                 # China -> Chinese  # cn
     "gr": "el",                                 # Greece -> Greek  # gr
     "cz": "cs",                                 # Czechia -> Czech  # cz
     "ua": "uk",                                 # Ukraine -> Ukrainian  # ua
-    # The SUPPORTED display name is "Chinese (Mandarin)", which a caller is unlikely to type
-    # verbatim; accept the natural words. Written text cannot distinguish the two, so both
-    # Mandarin and Cantonese resolve to the single 'zh' entry.
-    "chinese": "zh",                            # natural word for the language  # chinese
+    "chinese": "zh",                            # nobody types "Chinese (Mandarin)" verbatim, so accept the plain word  # chinese
     "mandarin": "zh",                           # spoken variety, same written form  # mandarin
     "cantonese": "zh",                          # spoken variety, same written form  # cantonese
 }
@@ -369,9 +347,7 @@ def resolve_language(lang: Optional[str]) -> Optional[str]:    # lang: whatever 
     return None                                 # not a supported language  # unsupported
 
 
-# Below this confidence, and not clearly English, we default to English
-# (per the product rule: "if uncertain, respond in English").
-_MIN_CONFIDENCE = 0.55                          # offline detector confidence floor  # threshold
+_MIN_CONFIDENCE = 0.55                          # below this and not clearly English -> default to English  # threshold
 
 # Scripts that NO supported language uses -> instant, guaranteed reject.
 _DEVANAGARI = re.compile("[ऀ-ॿ]")            # Hindi, Marathi, Nepali...  # devanagari range
@@ -457,9 +433,7 @@ class LanguageDetector:                     # offline fallback engine, no LLM in
         }
 
 
-# Module-level singleton so the model is loaded once and reused across warm
-# Function invocations instead of being rebuilt on every request.
-_DETECTOR = LanguageDetector()                  # shared offline detector instance  # singleton
+_DETECTOR = LanguageDetector()                  # model loaded once, reused across warm invocations  # singleton
 
 
 #=============================================Azure AI Foundry=====================================
@@ -473,9 +447,7 @@ class FoundryAgentService:                  # LLM engine for detection AND trans
     def __init__(self, config: FoundryConfig, credential):    # builds the project + OpenAI-compatible clients  # constructor
         self.config = config                    # endpoint + agent name used by every call  # keep config
         self.project = self._build_project_client(config.endpoint, credential)  # Foundry project client  # project client
-        # OpenAI-compatible client used for conversations + responses, configured with a
-        # timeout + retry policy (SDK retries transient 429/5xx/timeout errors with backoff).
-        raw_client = self.project.get_openai_client()   # OpenAI-compatible surface of the project  # raw client
+        raw_client = self.project.get_openai_client()   # OpenAI-compatible surface used for conversations + responses  # raw client
         try:                                # not every client build exposes with_options()  # guard build
             self.openai = raw_client.with_options(      # apply the timeout + retry policy  # harden client
                 timeout=FOUNDRY_TIMEOUT_SECONDS, max_retries=FOUNDRY_MAX_RETRIES    # tunables from App Settings  # policy
@@ -574,8 +546,7 @@ class FoundryAgentService:                  # LLM engine for detection AND trans
             result["engine"] = "rule"           # produced without an LLM call  # engine tag
             return result                       # early return, no upstream call  # respond
 
-        # Fast, deterministic rejects for scripts no supported language uses.
-        # These save an LLM round-trip and can never be misread.
+        # Fast, deterministic rejects: these save an LLM round-trip and can never be misread.
         if _DEVANAGARI.search(text):            # Devanagari characters present  # script check
             result = LanguageDetector._rejected("hi", None, text)   # report as Hindi and reject  # reject
             result["engine"] = "rule"           # produced without an LLM call  # engine tag
@@ -639,8 +610,7 @@ class FoundryAgentService:                  # LLM engine for detection AND trans
             if len(token) == 2 and token.isalpha():     # looks like an ISO 639-1 code  # code shaped
                 return token  # a valid-looking code we do not otherwise track (e.g. 'fi')  # return code
 
-        # 2. A supported language display NAME appearing anywhere ('...is Japanese').
-        #    Names are unambiguous, so this is safe even inside a sentence.
+        # 2. A display NAME anywhere ('...is Japanese') - unambiguous, so safe inside a sentence.
         for code, name in SUPPORTED.items():    # walk the supported languages  # name match
             if name.lower() in cleaned:         # the display name appears in the reply  # found name
                 return code                     # map the name back to its code  # return code
@@ -669,12 +639,9 @@ class FoundryAgentService:                  # LLM engine for detection AND trans
 
 
 #=====================================Cached Foundry service=======================================
-# The Foundry client + credential are relatively expensive to build (token acquisition, HTTP
-# session). Build ONCE per worker and reuse across requests; rebuild only if the endpoint/agent
-# configuration changes. Guarded by a lock for the concurrent Python worker.
-_service_lock = threading.Lock()                # guards the one-time service build  # build lock
-_foundry_service: Optional[FoundryAgentService] = None      # cached service instance  # cache slot
-_foundry_service_key: Optional[tuple] = None    # config the cached instance was built from  # cache key
+_service_lock = threading.Lock()                # guards the one-time build for the concurrent worker  # build lock
+_foundry_service: Optional[FoundryAgentService] = None      # built ONCE per worker; the client is expensive (token + HTTP session)  # cache slot
+_foundry_service_key: Optional[tuple] = None    # config it was built from; a change forces a rebuild  # cache key
 
 
 # Return a cached FoundryAgentService, (re)building it only when config changes. Building the
@@ -752,9 +719,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 400, correlation_id,            # status plus the trace id  # status + trace
             )
 
-        # 3a. DETECT mode -> identify the language with the Foundry LLM agent.
-        #     Falls back to the offline py3langid detector if Foundry is unavailable,
-        #     so this endpoint stays up even when the LLM cannot be reached.
+        # 3a. DETECT mode -> Foundry LLM, falling back offline so this endpoint never goes down.
         if agent_mode == "detect":              # caller asked only for the language  # detect mode
             try:                            # Foundry path, with the offline fallback below  # guard call
                 config = load_config()          # endpoint, agent name and environment  # load config
@@ -844,9 +809,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         )
 
     except Exception:                           # catch-all so no stack trace ever reaches a client  # safety net
-        # Final safeguard: log the full stack trace server-side, but NEVER leak internal
-        # exception detail to the caller. The correlation_id lets support find the log.
-        logger.exception("Unhandled exception in Multilingual Agent function.")  # full stack for operators  # error log
+        logger.exception("Unhandled exception in Multilingual Agent function.")  # full stack server-side only, never to the caller  # error log
         return error_response(                  # 500 indicates a server-side fault  # server error response
             "Unhandled server error. Please contact the automation team.",    # what the user should do  # message
             f"An unexpected error occurred. Quote correlation_id '{correlation_id}' to support.",     # no internal detail  # details

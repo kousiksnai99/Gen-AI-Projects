@@ -1,32 +1,185 @@
-ServiceNow Agent — Deliverables
-Create the ticket/interaction creation workflow function — HTTP-triggered Azure Function as the orchestrator's single entry point.
-Implement action-routing logic for the full ticket lifecycle — create interaction, create incident, update incident, resolve, close.
-Implement ticket-to-incident conversion for unresolved cases — an open interaction is escalated into an incident under the same conversation.
-Create a common, reusable agent-integration framework — Foundry Responses API + agent_reference, ready to reuse for future API integrations.
-Implement secure authentication via Managed Identity (Entra ID) — no secrets in code; reusable across other agents.
-Implement single-incident-per-conversation continuity — conversation_id → correlation_id, one conversation maps to exactly one incident.
-Prepare integration interfaces/placeholders for the client ticketing APIs — agent tool layer stubbed until live ServiceNow APIs/credentials arrive.
-Create the Ticket (Interaction/IMS) and Incident (INC) data models/response templates — the exact fields the orchestrator consumes.
-Implement testing with dummy data until actual APIs are available — agent-generated placeholder IDs + Postman end-to-end flow.
-Timeline
-#	Deliverable	Start	End	Status
-1	Ticket/interaction creation workflow function	28 Jul	29 Jul	✅ Done
-2	Action-routing logic (full lifecycle)	29 Jul	30 Jul	✅ Done
-3	Ticket-to-incident conversion (unresolved cases)	30 Jul	31 Jul	✅ Done
-4	Common agent-integration framework	30 Jul	30 Jul	✅ Done
-5	Secure authentication (Managed Identity)	30 Jul	30 Jul	✅ Done
-6	Single-incident-per-conversation continuity	31 Jul	01 Aug	✅ Done
-7	Integration placeholders for client ticketing APIs	01 Aug	02 Aug	🔄 Placeholder (awaiting APIs)
-8	Ticket & Incident data models/templates	31 Jul	01 Aug	✅ Done
-9	Testing with dummy data (Postman)	03 Aug	05 Aug	🔄 In progress
-
-Feature Name
-"Main Ticket Service - Built one main service that handles all support ticket requests."
-"Full Ticket Lifecycle - It can log a query, create a ticket, update it, resolve it, and close it."
-"Auto Query-to-Ticket - If an issue isn't solved, it automatically turns it into a support ticket."
-"Reusable Framework - Built in a reusable way, so new systems can be added easily later."
-"One Conversation = One Ticket - One conversation always stays linked to one ticket, no mix-ups."
-"ServiceNow-Ready Integration - Ready to connect to the real ServiceNow system whenever access is given."
-"Standard Ticket Format - Uses a fixed, clean format so ticket details are always consistent."
-"End-to-End Testing - Fully tested end-to-end with sample data until the live system is ready."
-
+==============================
+2
+CASE 1: CREATE INTERACTION
+3
+==============================
+4
+ 
+5
+Payload:
+6
+{
+7
+"conversation_id": "conv-1001",
+8
+"action": "create_interaction",
+9
+"user": "john.doe"
+10
+}
+11
+ 
+12
+Response:
+13
+{
+14
+"interaction_id": "IMS0004567",
+15
+"user": "john.doe",
+16
+"message": "Interaction IMS0004567 created."
+17
+}
+18
+ 
+19
+==============================
+20
+CASE 2: CREATE INCIDENT
+21
+==============================
+22
+ 
+23
+Payload:
+24
+{
+25
+"conversation_id": "conv-1001",
+26
+"action": "create_incident",
+27
+"interaction_id": "IMS0001234",
+28
+"issue_type": "email",
+29
+"details": "Cannot access mailbox"
+30
+}
+31
+ 
+32
+Response:
+33
+{
+34
+"incident_id": "INC0047821",
+35
+"interaction_id": "IMS0001234",
+36
+"issue_type": "email",
+37
+"message": "Incident INC0047821 has been created under interaction IMS0001234."
+38
+}
+39
+ 
+40
+==============================
+41
+CASE 3: UPDATE INCIDENT
+42
+==============================
+43
+ 
+44
+Payload:
+45
+{
+46
+"conversation_id": "conv-1001",
+47
+"action": "update_incident",
+48
+"incident_id": "INC0009876",
+49
+"note": "User called again for an update"
+50
+}
+51
+ 
+52
+Response:
+53
+{
+54
+"incident_id": "INC0009876",
+55
+"note": "User called again for an update",
+56
+"message": "Incident INC0009876 updated."
+57
+}
+58
+ 
+59
+==============================
+60
+CASE 4: RESOLVE INCIDENT
+61
+==============================
+62
+ 
+63
+Payload:
+64
+{
+65
+"conversation_id": "conv-1001",
+66
+"action": "resolve",
+67
+"interaction_id": "IMS0001234",
+68
+"incident_id": "INC0009876"
+69
+}
+70
+ 
+71
+Response:
+72
+{
+73
+"incident_id": "INC0009876",
+74
+"interaction_id": "IMS0001234",
+75
+"message": "Incident INC0009876 has been resolved."
+76
+}
+77
+ 
+78
+==============================
+79
+CASE 5: CLOSE INTERACTION
+80
+==============================
+81
+ 
+82
+Payload:
+83
+{
+84
+"conversation_id": "conv-1001",
+85
+"action": "close_interaction",
+86
+"interaction_id": "IMS0001234"
+87
+}
+88
+ 
+89
+Response:
+90
+{
+91
+"interaction_id": "IMS0001234",
+92
+"message": "Interaction IMS0001234 closed."
+93
+}

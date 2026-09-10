@@ -1,3 +1,31 @@
+ITOA-Project-Agentic-AI-ServiceNow-Agent
+ 
+project endpoint: https://aifoundry-itoa-ai-automation-aik-swce-poc.services.ai.azure.com/api/projects/aifp-sd-voice-automation-aik-swce-poc
+ 
+OpenAI endpoint: https://aifoundry-itoa-ai-automation-aik-swce-poc.openai.azure.com/openai/v1
+ 
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #####################################################################################
 ## Project name : ServiceNow Agent (mock + real Foundry agent)                      #
 ## Business owner , Team : Data and AIA                                             #
